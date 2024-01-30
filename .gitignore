@@ -1,0 +1,6 @@
+/demix
+/struct
+*.mp3
+*.wav
+__pycache__
+*.png
