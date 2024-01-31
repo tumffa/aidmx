@@ -1,7 +1,11 @@
 import DataService
 import quiet_before_drop
+import StatisticsService
 
 dm = DataService.DataManager()
-dm.extract_data("blue", "blue.mp3")
-print(dm)
-quiet_before_drop.get_pauses("blue", dm.get_song("blue"))
+def lesgo(name, file):
+    dm.extract_data(name, file)
+    segments = StatisticsService.segment(name, dm.get_song(name), ["drums", "other"])
+    print("------------------SEGMENTS--------------------")
+    print(segments)
+lesgo("blue", "blue.mp3")

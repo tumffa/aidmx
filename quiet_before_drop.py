@@ -1,27 +1,28 @@
 import librosa
 import json
-from StatisticsService import get_rms
+import StatisticsService
 
 def get_pauses(name, data):
+    print(f"Getting pauses for {name}")
     drums_path = f"{data['demixed']}/drums.wav"
     bass_path = f"{data['demixed']}/bass.wav"
     other_path = f"{data['demixed']}/other.wav"
     vocals_path = f"{data['demixed']}/vocals.wav"
 
     # Calculate the RMS of the paths
-    drum_rms = get_rms(path=drums_path)
-    bass_rms = get_rms(path=bass_path)
-    other_rms = get_rms(path=other_path)
-    vocals_rms = get_rms(path=vocals_path)
+    drum_rms = StatisticsService.get_rms(path=drums_path)
+    bass_rms = StatisticsService.get_rms(path=bass_path)
+    other_rms = StatisticsService.get_rms(path=other_path)
+    vocals_rms = StatisticsService.get_rms(path=vocals_path)
     
     # Define a threshold for what constitutes a "quiet" section
     quiet_threshold = 0.05
 
     # Find the quiet sections in each track
-    drum_quiet = drum_rms < quiet_threshold
-    bass_quiet = bass_rms < quiet_threshold
-    other_quiet = other_rms < quiet_threshold
-    vocals_quiet = vocals_rms < quiet_threshold
+    drum_quiet = drum_rms[0] < quiet_threshold
+    bass_quiet = bass_rms[0] < quiet_threshold
+    other_quiet = other_rms[0] < quiet_threshold
+    vocals_quiet = vocals_rms[0] < quiet_threshold
 
     combined_quiet = [0] * max(len(drum_quiet), len(bass_quiet), len(other_quiet), len(vocals_quiet))
     # Combine the quiet sections into a single array
@@ -66,8 +67,8 @@ def get_pauses(name, data):
     if start_index is not None:
         quiet_ranges.append((start_index, len(quiet_sections)))
 
-    for start_index, end_index in quiet_ranges:
-        print('Quiet section from {} to {}'.format(start_index, end_index))
+    # for start_index, end_index in quiet_ranges:
+    #     print('Quiet section from {} to {}'.format(start_index, end_index))
 
     with open(f"./struct/{name}vocals.json", 'r') as f:
         data = json.load(f)
@@ -90,7 +91,7 @@ def get_pauses(name, data):
             # Calculate the difference in frames between the segment start and the end of the quiet range
             diff_frames1 = abs(segment_start_frame - quiet_ranges[i][1])
             diff_frames2 = abs(segment_start_frame - quiet_ranges[i][0])
-            print(f"Comparing {segment_start_frame} to {quiet_ranges[i]} with diff {diff_frames1} and {diff_frames2}")
+            # print(f"Comparing {segment_start_frame} to {quiet_ranges[i]} with diff {diff_frames1} and {diff_frames2} with volume {drum_rms[0][i]}")
             
             # Convert 2.5 seconds to frames
             diff_frames_threshold = int(1.5 * sr)
@@ -102,5 +103,5 @@ def get_pauses(name, data):
                 silent_pre_segments.append(quiet_ranges[i])
                 last_quiet_range = quiet_ranges[i]
                 break
-
-    print(silent_pre_segments)
+            
+    return silent_pre_segments

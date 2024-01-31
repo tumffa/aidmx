@@ -48,17 +48,13 @@ class DataManager:
                 print("Already demixed")
         except Exception as e:
             print(f"Error while demixing: {e}")
-        # List of categories
-        categories = ['drums', 'bass', 'vocals', 'other']
-        # For each category
+        categories = ['vocals']
         for category in categories:
+            print("Category: " + category)
             try:
                 if not os.path.exists(f"./struct/{audio_name}{category}.json"):
                     # Construct the path to the JSON file
-                    json_path = os.path.join('./struct', f'{audio_name}{category}.json')
-
-                    # Check if the JSON file exists
-                    if not os.path.exists(json_path):
-                        pass  # Add your code here
+                    analyzed = allin1.analyze(Path(f"./demix/htdemucs/{audio_name}/{category}.wav"))
+                    helpers.save_results(analyzed, './struct', f"{audio_name}{category}")
             except Exception as e:
-                print(f"Error while processing category {category}: {e}")
+                print(f"Json for {category} already exists")
