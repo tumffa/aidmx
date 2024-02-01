@@ -7,5 +7,6 @@ def lesgo(name, file):
     dm.extract_data(name, file)
     segments = StatisticsService.segment(name, dm.get_song(name), ["drums", "other"])
     print("------------------SEGMENTS--------------------")
-    print(segments)
+    for segment in segments:
+        print(segment)
 lesgo("blue", "blue.mp3")

@@ -1,7 +1,10 @@
 import os
 from pathlib import Path
 import allin1
+import json
 from allin1 import demix, helpers
+from dataclasses import asdict
+from typing import Union, List
 
 class DataManager:
     def __init__(self):
@@ -58,3 +61,39 @@ class DataManager:
                     helpers.save_results(analyzed, './struct', f"{audio_name}{category}")
             except Exception as e:
                 print(f"Json for {category} already exists")
+
+def update_struct_data(name, params):
+    # Load the existing data
+    with open(f'./struct/{name}.json', 'r') as f:
+        struct_data = json.load(f)
+
+    # Update the segments with the given parameters
+    for dictionary in params:
+        struct_data.update(dictionary)
+
+    # Save the updated data
+    save_json(struct_data, './struct', name)
+
+def save_json(
+    results: Union[dict, List[dict]],
+    out_dir: str,
+    name = None
+):
+    if not isinstance(results, list):
+        results = [results]
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for result in results:
+        if name is not None:
+            out_path = out_dir / f"{name}.json"
+        else:
+            out_path = out_dir / f"{result['path']}.json"
+        result['path'] = str(result['path'])
+
+        json_str = json.dumps(result, indent=2)
+        out_path.write_text(json_str)
+
+def get_struct_data(name):
+    with open(f'./struct/{name}.json', 'r') as f:
+        struct_data = json.load(f)
+    return struct_data

@@ -5,6 +5,11 @@ from pathlib import Path
 import pychorus
 import math
 import quiet_before_drop
+from pathlib import Path
+from typing import Union, List
+from dataclasses import asdict
+import numpy as np
+import DataService
 
 def get_rms(song_data=None, category=None, path=None)->tuple[list[float], float]:
     # Load the segment data from the JSON file
@@ -42,6 +47,8 @@ def section_by_rms(song_data=None, category=None, path=None, name=None, pauses=N
         rms, average = get_rms(song_data)
     rms_average = get_modified_rms(song_data, name=name, rms=rms, pauses=pauses)
     average = sum(rms_average) / len(rms_average)
+    song_rms = get_rms(song_data)[0]
+    update_struct(song_data, name=name, rms=rms)
 
     # Define the window size and the minimum number of frames
     window_size = 50
@@ -61,12 +68,12 @@ def section_by_rms(song_data=None, category=None, path=None, name=None, pauses=N
 
     # Initialize the window start index
     i = 0
-
     # While there is enough data left for a window
     while i <= len(rms) - window_size:
         # Determine the volume category of the window
         quiet_count = sum(1 for j in range(i, i + window_size) if rms[j] <= low_threshold)
         loud_count = sum(1 for j in range(i, i + window_size) if rms[j] >= high_threshold)
+        avg_volume = sum(song_rms[j] for j in range(i, i + window_size)) / window_size
 
         if loud_count >= high_scale * min_frames:
             volume_category = 'loud'
@@ -84,12 +91,13 @@ def section_by_rms(song_data=None, category=None, path=None, name=None, pauses=N
                 sections.append(current_section)
 
             # Start a new section
-            current_section = {'start': i, 'end': i + window_size - 1, 'category': volume_category}
+            current_section = {'start': i, 'end': i + window_size - 1, 'category': volume_category, 'avg_volume': avg_volume}
             current_category = volume_category
 
         # Otherwise, continue the current section
         else:
             current_section['end'] = i + window_size - 1
+            current_section['avg_volume'] = (current_section['avg_volume'] * (window_size - 1) + song_rms[i + window_size - 1]) / window_size
 
         # Move the window start to the end of the current section
         i = current_section['end'] + 1
@@ -100,23 +108,38 @@ def section_by_rms(song_data=None, category=None, path=None, name=None, pauses=N
 
     return sections
 
+def update_struct(song_data, name=None, category=None, path=None, rms=False, params=[]):
+    params = params
+    struct_data = DataService.get_struct_data(name)
+    if rms != False:
+        if type(rms) != list:
+            rms, average = get_rms(song_data, category=category)
+        segments = struct_data['segments']
+        for segment in segments:
+            segment_start = segment['start']
+            segment_end = segment['end']
+            average_rms = sum(rms[int(segment_start*43):int(segment_end*43)]) / len(rms[int(segment_start*43):int(segment_end*43)])
+
+            segment['avg_volume'] = average_rms
+
+        params.append({'segments': segments})
+
+    DataService.update_struct_data(name=name, params=params)
+
+#INSERT SPAGHETTI CODE HERE (I'm sorry)
 def segment(name, song_data, sectionby):
     # Use section_by_rms to segment the song into sections for vocals and for drums/other
     pauses = quiet_before_drop.get_pauses(name, song_data)
     if not sectionby:
-        rms_sections = section_by_rms(song_data, name=name, pauses=pauses)
+        rms_ = section_by_rms(song_data, name=name, pauses=pauses)
     else:
-        rms_sections = section_by_rms(song_data, category=sectionby, name=name, pauses=pauses)
-    rms_sections = merge_short_sections(rms_sections)
-    print("------------------SECTIONS1--------------------")
-    print(rms_sections)
-    rms_sections = merge_same_category_sections(rms_sections)
-    print("------------------SECTIONS2--------------------")
-    print(rms_sections)
+        rms_ = section_by_rms(song_data, category=sectionby, name=name, pauses=pauses)
+    rms_short = merge_short_sections(rms_)
+    rms_sections = merge_same_category_sections(rms_short)
+    update_struct(song_data, name=name, params=[{'sections1': rms_, 'sections2': rms_short, 'sections3': rms_sections}])
 
     # Load the structure data from the JSON file
-    with open(f'./struct/{name}.json', 'r') as f:
-        struct_data = json.load(f)
+    struct_data = DataService.get_struct_data(name)
 
     # Find the start times of the choruses
     segments = struct_data['segments']
@@ -126,7 +149,6 @@ def segment(name, song_data, sectionby):
     # Identify the sections where choruses begin
     chorus_sections = []
     i = 0
-    section_ids = {}
     for segment in segments:
         if segment['label'] == 'start' or segment['label'] == 'verse' or segment['label'] == 'bridge' or segment['label'] == 'outro':
             i+=1
@@ -161,10 +183,9 @@ def segment(name, song_data, sectionby):
                 if section['category'] == 'loud' and segment_start not in chorus_sections:
                     # Check if the start of the previous section is not in chorus_sectionsw
                     if i < len(segments) - 1 and segments[i+1]['label'] != 'inst':
-                            if (segments[i-1]['start'] not in chorus_sections):
+                            if segments[i-1]['start'] not in chorus_sections:
                                 why = 5
                                 chorus_sections.append(segment_start)
-                                section_ids[segment_str] = (section['start'], section['end'])
                                 print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
                                 break
                         # elif abs(start_difference) <= 100 and (i > 0 and segments[i-1]['start'] in chorus_sections) and (section_ids.get(segment_str, (0, 0))[1] - section_ids.get(segment_str, (0, 0))[0] >= 395):
@@ -177,18 +198,15 @@ def segment(name, song_data, sectionby):
                                 chorus_sections.append(segment_start)
                                 why = 6
                                 print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
-                                section_ids[segment_str] = (section['start'], section['end'])
                                 break
                             if segment["label"] == "inst":
                                 chorus_sections.append(segment_start)
                                 why =7
-                                section_ids[segment_str] = (section['start'], section['end'])
                                 print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
                                 break
                     elif abs(start_difference) >= 100:
                         chorus_sections.append(segment_start)
                         why = 8
-                        section_ids[segment_str] = (section['start'], section['end'])
                         print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
                         break
             elif section['start'] <= 43 * segment_start <= section['end'] and section['category'] == 'loud':
@@ -199,11 +217,9 @@ def segment(name, song_data, sectionby):
                         if (abs(pause[0] - section["start"]) <= 100 or abs(pause[1] - section["start"]) <= 100) and ((abs(pause[0] - 43*segment_start) <= 100 or abs(pause[1] - 43*segment_start) <= 100) and segment["label"] == "chorus" or segment["label"] == "inst"):
                             if segment_start not in chorus_sections:
                                 chorus_sections.append(segment_start)
-                                section_ids[segment_str] = (section['start'], section['end'])
                                 print(f"Segment start: {segment_start} added by pause {pause} at {section}")
                 break
         i += 1
-    print(f"Chorus sections: {section_ids}")
     return chorus_sections
 
 def merge_short_sections(sections):
