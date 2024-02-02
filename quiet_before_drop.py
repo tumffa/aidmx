@@ -1,6 +1,7 @@
 import librosa
 import json
 import StatisticsService
+import DataService
 
 def get_pauses(name, data):
     print(f"Getting pauses for {name}")
@@ -15,14 +16,19 @@ def get_pauses(name, data):
     other_rms = StatisticsService.get_rms(path=other_path)
     vocals_rms = StatisticsService.get_rms(path=vocals_path)
     
+    struct_data = DataService.get_struct_data(name)
+    average_volume = struct_data["total_rms"]
     # Define a threshold for what constitutes a "quiet" section
-    quiet_threshold = 0.05
+    quiet_threshold_drums = 0.22*average_volume
+    quiet_threshold_bass = 0.22*average_volume
+    quiet_threshold_other = 0.22*average_volume
+    quiet_threshold_vocals = 0.22*average_volume
 
     # Find the quiet sections in each track
-    drum_quiet = drum_rms[0] < quiet_threshold
-    bass_quiet = bass_rms[0] < quiet_threshold
-    other_quiet = other_rms[0] < quiet_threshold
-    vocals_quiet = vocals_rms[0] < quiet_threshold
+    drum_quiet = drum_rms[0] < quiet_threshold_drums
+    bass_quiet = bass_rms[0] < quiet_threshold_bass
+    other_quiet = other_rms[0] < quiet_threshold_other
+    vocals_quiet = vocals_rms[0] < quiet_threshold_vocals
 
     combined_quiet = [0] * max(len(drum_quiet), len(bass_quiet), len(other_quiet), len(vocals_quiet))
     # Combine the quiet sections into a single array
@@ -35,10 +41,9 @@ def get_pauses(name, data):
             combined_quiet[i] += 1
         if vocals_quiet[i]:
             combined_quiet[i] += 1
-
     # Define the window size and the minimum number of quiet frames
-    window_size = 30
-    min_quiet_frames = 22
+    window_size = 15
+    min_quiet_frames = 8
 
     # Initialize an array to hold the quiet sections
     quiet_sections = [0] * len(combined_quiet)
