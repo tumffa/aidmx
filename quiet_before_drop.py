@@ -110,3 +110,35 @@ def get_pauses(name, data):
                 break
             
     return silent_pre_segments
+
+def get_pauses_for_segment(rms, threshold):
+    # Define a threshold for what constitutes a "quiet" section
+    quiet_threshold = threshold
+    # Find the quiet sections in each track
+    quiet = rms < quiet_threshold
+    # Define the window size and the minimum number of quiet frames
+    window_size = 50
+    min_quiet_frames = 40
+    # Initialize an array to hold the quiet sections
+    quiet_sections = [0] * len(quiet)
+    # For each window of frames
+    for i in range(len(quiet) - window_size + 1):
+        # Count how many frames in the window are quiet
+        quiet_count = sum(1 for j in range(i, i + window_size) if quiet[j])
+        # If at least min_quiet_frames are quiet, mark the entire window as a quiet section
+        if quiet_count >= min_quiet_frames:
+            for j in range(i, i + window_size):
+                quiet_sections[j] = 1
+    # Find the beginning and end indexes of the quiet sections
+    quiet_ranges = []
+    start_index = None
+    for i, is_quiet in enumerate(quiet_sections):
+        if is_quiet and start_index is None:
+            start_index = i
+        elif not is_quiet and start_index is not None:
+            quiet_ranges.append((start_index, i))
+            start_index = None
+    # If the last section is quiet, add it to the list
+    if start_index is not None:
+        quiet_ranges.append((start_index, len(quiet_sections)))
+    return quiet_ranges

@@ -114,33 +114,108 @@ def section_by_rms(song_data=None, category=["drums", "other"], path=None, name=
 def update_struct(song_data, name=None, category=None, path=None, rms=False, params=[]):
     params = params
     struct_data = DataService.get_struct_data(name)
+
+    drums_rms = get_rms(song_data, category=["drums"])[0]
+    bass_rms = get_rms(song_data, category=["bass"])[0]
+    drums_rms = [drums_rms[i] + bass_rms[i] for i in range(len(drums_rms))]
+
     if rms != False:
         if type(rms) != list:
             rms, average = get_rms(song_data, category=category)
         segments = struct_data['segments']
         song_rms = get_rms(song_data)[0]
+        song_rms = [i for i in song_rms]
+
         total_volumes = []
         avg_volumes = []
+        drum_volumes = []
+        loud_sections = []
+        focus = {}
+        is_quiet = False
+        labels = {}
+
         for segment in segments:
+            if segment["end"] - segment["start"] <= 1.5:
+                segment["avg_combined"] = 0
+                segment['avg_volume'] = 0
+                segment['avg_drums'] = 0
+                continue
+            labels[segment['label']] = True
             segment_start = segment['start']
             segment_end = segment['end']
+
             rms_slice = rms[int(segment_start*43):int(segment_end*43)]
+            temp_avg = sum(rms_slice) / len(rms_slice)
+            pauses = quiet_before_drop.get_pauses_for_segment(rms_slice, temp_avg*0.2)
+            rms_slice = get_modified_rms(song_data, name=name, rms=rms_slice, pauses=pauses)
+            rms_slice = [i for i in rms_slice if i != 0]
+
+            drums_slice = drums_rms[int(segment_start*43):int(segment_end*43)]
+            temp_avg = sum(drums_slice) / len(drums_slice)
+            pauses = quiet_before_drop.get_pauses_for_segment(drums_slice, temp_avg*0.2)
+            drums_slice = get_modified_rms(song_data, name=name, rms=drums_slice, pauses=pauses)
+            drums_slice = [i for i in drums_slice if i != 0]
+
+            song_slice = song_rms[int(segment_start*43):int(segment_end*43)]
+            temp_avg = sum(song_slice) / len(song_slice)
+            song_slice = get_modified_rms(song_data, name=name, rms=song_slice, pauses=pauses)
+            song_slice = [i for i in song_slice if i != 0]
+
             if len(rms_slice) > 0:
                 average_rms = sum(rms_slice) / len(rms_slice)
             else:
                 average_rms = 0    
-            rms_slice = song_rms[int(segment_start*43):int(segment_end*43)]
-            if len(rms_slice) > 0:
-                average_total_rms = sum(rms_slice) / len(rms_slice)
+            if len(drums_slice) > 0:
+                average_drums = sum(drums_slice) / len(drums_slice)
+            else:
+                average_drums = 0
+            if len(song_slice) > 0:
+                average_total_rms = sum(song_slice) / len(song_slice)
             else:
                 average_total_rms = 0
             segment["avg_combined"] = average_total_rms
             segment['avg_volume'] = average_rms
+            segment['avg_drums'] = average_drums
             avg_volumes.append(average_rms)
             total_volumes.append(average_total_rms)
+            drum_volumes.append(average_drums)
         song_average = sum(avg_volumes) / len(avg_volumes)
         total_rms = sum(song_rms) / len(song_rms)
-        params.append({'segments': segments, 'average_rms': song_average, 'total_rms': total_rms})
+        drum_average = sum(drum_volumes) / len(drum_volumes)
+
+        verses = [segment for segment in segments if segment['label'] == 'verse']
+        verses_avg = sum([segment['avg_combined'] for segment in verses]) / len(verses)
+        
+        choruses = [segment for segment in segments if segment['label'] == 'chorus']
+        choruses_avg = sum([segment['avg_combined'] for segment in choruses]) / len(choruses)
+
+        versesdrum_average = sum([segment['avg_drums'] for segment in verses]) / len(verses)
+        chorusesdrum_average = sum([segment['avg_drums'] for segment in choruses]) / len(choruses)
+
+        if "inst" in labels:
+            inst = [segment for segment in segments if segment['label'] == 'inst']
+            inst_average = sum([segment['avg_combined'] for segment in inst]) / len(inst)
+            average_volumes = {"verse": verses_avg, "chorus": choruses_avg, "inst": inst_average}
+        else:
+            average_volumes = {"verse": verses_avg, "chorus": choruses_avg}
+        if choruses_avg > total_rms and chorusesdrum_average > drum_average:
+            loud_sections.append(("chorus", choruses_avg))
+        if verses_avg > total_rms and versesdrum_average > drum_average:
+            loud_sections.append(("verse", verses_avg))
+        if "inst" in labels:
+            if inst_average > total_rms:
+                loud_sections.append(("inst", inst_average))
+        loud_sections_average = sum([section[1] for section in loud_sections]) / len(loud_sections)
+        # Sort sections by average loudness in descending order
+        sorted_sections = sorted(loud_sections, key=lambda item: item[1], reverse=True)
+        # Assign sections to focus dictionary based on loudness
+        focuses = ["first", "second", "third"]
+        for i in range(len(sorted_sections)):
+            focus[focuses[i]] = sorted_sections[i][0]
+        # Print focus dictionary
+        print(focus)
+
+        params.append({'segments': segments, 'average_rms': song_average, 'total_rms': total_rms, "loud_sections": [section[0] for section in loud_sections], "focus": focus, "is_quiet": is_quiet, "loud_sections_average": loud_sections_average, "average_volumes": average_volumes, "drum_average": drum_average})
 
     DataService.update_struct_data(name=name, params=params)
 
@@ -168,8 +243,10 @@ def segment(name, song_data, sectionby):
     chorus_sections = []
     added_sections = []
     i = 0
+    volume_threshold = struct_data["loud_sections_average"] * 0.07
+    print(f"Volume threshold: {volume_threshold}")
     for segment in segments:
-        if segment['label'] == 'start' or segment['label'] == 'verse' or segment['label'] == 'bridge' or segment['label'] == 'outro':
+        if segment['label'] == 'start' or segment['label'] == 'bridge':
             i+=1
             continue
         temp = {"seg_start": segment["start"], "seg_end": segment["end"], "label": segment["label"], "avg_volume": segment["avg_volume"], "avg_combined": segment["avg_combined"]}
@@ -180,6 +257,9 @@ def segment(name, song_data, sectionby):
         segment_start = segment['start']
         segment_end = segment['end']
         segment_str = str(segment_start)
+
+        volume_difference = segment["avg_combined"]-struct_data["loud_sections_average"]
+        print(f"Volume difference: {volume_difference}")
         for section in rms_sections:
             go = False
             if section['end'] - section['start'] <= 395:
@@ -197,8 +277,31 @@ def segment(name, song_data, sectionby):
                 why = 3
             elif end_difference < 0 and end_difference >= threshold2:
                 go = True
-                why = 4         
-            if section["category"] == "loud" and (segments[i-1]["label"] == segment["label"] or segment["label"] == "inst") and segment["avg_volume"]/struct_data["average_rms"] >= 1.15:
+                why = 4   
+
+
+            if (segment["label"] in struct_data["loud_sections"] or segment["label"] in ["intro", "outro", "inst"]) and volume_difference >= -volume_threshold:
+                if segments[i+1]["label"] != "inst" and (segments[i+1]["label"] != segment["label"] or segment["end"] - segment["start"] >= 23):
+                    temp["section"] = section
+                    chorus_sections.append(temp)
+                    added_sections.append(segment_start)
+                    print(f"Segment start: {segment_start} added by in loud sections at {section}")
+                    break
+                elif segments[i+1]["avg_combined"] < segment["avg_combined"]:
+                    temp["section"] = section
+                    chorus_sections.append(temp)
+                    added_sections.append(segment_start)
+                    print(f"Segment start: {segment_start} added by in loud sections at {section}")
+                    break
+            elif segment["label"] in struct_data["average_volumes"]:
+                if segment["avg_combined"] - struct_data["average_volumes"][segment["label"]] >= -volume_threshold and volume_difference >= -volume_threshold:
+                    temp["section"] = section
+                    chorus_sections.append(temp)
+                    added_sections.append(segment_start)
+                    print(f"Segment start: {segment_start} added by in average volumes at {section}")
+                    break
+
+            if section["category"] == "loud" and (segments[i-1]["label"] == segment["label"] or segment["label"] == "inst") and volume_difference >= -volume_threshold and segment_start not in added_sections:
                 if section["start"] <= 43 * segment_start <= section["end"] or abs(section["start"] - 43 * segment_start) <= 100:
                     temp["section"] = section
                     chorus_sections.append(temp)
@@ -214,10 +317,10 @@ def segment(name, song_data, sectionby):
                     break
             if go:
                 print(f"Segment start: {segment_start} at {section} being checked")
-                if section['category'] == 'loud' and segment_start not in added_sections and segment["avg_volume"]/struct_data["average_rms"] >= 1.15:
+                if section['category'] == 'loud' and segment_start not in added_sections and volume_difference >= -volume_threshold:
                     # Check if the start of the previous section is not in chorus_sectionsw
                     if i < len(segments) - 1 and segments[i+1]['label'] != 'inst':
-                        if (i + 1 != len(segments) and segment["avg_volume"] - segments[i+1]["avg_volume"] >= -0.02) or segments[i+1]["label"] == "verse":
+                        if (i + 1 != len(segments) and segment["avg_combined"] - segments[i+1]["avg_combined"] >= -0.02) or segments[i+1]["label"] == "verse":
                             if segments[i-1]['start'] not in added_sections:
                                 why = 5
                                 temp["section"] = section
@@ -246,7 +349,7 @@ def segment(name, song_data, sectionby):
                                 print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
                                 break
                     elif i + 1 != len(segments):
-                        if abs(start_difference) >= 100 and segment["avg_volume"] >= segments[i+1]["avg_volume"] or segment["avg_volume"]/struct_data["average_rms"] >= 1.15 or segment["avg_volume"] - segments[i-1]["avg_volume"] >= 0.035:
+                        if abs(start_difference) >= 100 and segment["avg_combined"] >= segments[i+1]["avg_combined"] or volume_difference <= volume_threshold or segment["avg_combined"] - segments[i-1]["avg_combined"] >= 0.035:
                             temp["section"] = section
                             chorus_sections.append(temp)
                             added_sections.append(segment_start)
@@ -255,7 +358,7 @@ def segment(name, song_data, sectionby):
                             break
             elif section['start'] <= 43 * segment_start <= section['end'] and section['category'] == 'loud':
                 for pause in pauses:
-                    if section["end"] - pause[0] <= 160 or (segment["label"] == "chorus" and segments[i + 1]["label"] != "inst") or segment["avg_volume"]/struct_data["average_rms"] >= 1.15 or segment["avg_volume"] - segments[i-1]["avg_volume"] >= 0.035:
+                    if section["end"] - pause[0] <= 160 or (segment["label"] == "chorus" and segments[i + 1]["label"] != "inst") or abs(segment["avg_combined"] - struct_data["loud_sections_average"]) <= 0.025 or segment["avg_combined"] - segments[i-1]["avg_combined"] >= 0.035:
                         break
                     if pause[1] - pause[0] <= 160:
                         if (abs(pause[0] - section["start"]) <= 100 or abs(pause[1] - section["start"]) <= 100) and ((abs(pause[0] - 43*segment_start) <= 100 or abs(pause[1] - 43*segment_start) <= 100) and segment["label"] == "chorus" or segment["label"] == "inst"):
@@ -311,10 +414,10 @@ def merge_same_category_sections(sections):
 
 def get_modified_rms(song_data, name, rms=False, category=None, pauses=False):
     if type(rms) != list:
+        print("not list")
         rms, average = get_rms(song_data, category=category)
     else:
         rms = rms
-
     if type(pauses) != list:
         pauses = quiet_before_drop.get_pauses(name, song_data)
     else:
@@ -324,7 +427,6 @@ def get_modified_rms(song_data, name, rms=False, category=None, pauses=False):
     modified_rms = rms
 
     # Set the RMS values between the pauses to 0
-    print(f"RMS {len(modified_rms)} Pauses {pauses}")
     for pause in pauses:
         start, end = pause[0], pause[1]
         for i in range(start, end):
@@ -336,3 +438,4 @@ def pre_drop_pauses(name, song_data):
     struct_data = DataService.get_struct_data(name)
     segments = struct_data['segments']
     chorus_sections = struct_data['chorus_sections']
+
