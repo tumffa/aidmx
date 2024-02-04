@@ -3,4 +3,5 @@
 *.mp3
 *.wav
 __pycache__
-*.png
+/*.png
+/*.txt
