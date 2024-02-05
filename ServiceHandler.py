@@ -1,6 +1,8 @@
 import DataService
 import quiet_before_drop
 import StatisticsService
+import ShowStructurer
+import DMXmanager
 import argparse
 from pathlib import Path
 import os
@@ -23,18 +25,19 @@ parser = argparse.ArgumentParser(description="This is my Python script.")
 
 
 dm = DataService.DataManager()
+structurer = ShowStructurer.ShowStructurer(dm)
+QLC_path = "kek"
+DMX = DMXmanager.DMXmanager(QLC_path, structurer)
 def lesgo(name, file):
     dm.extract_data(name, file)
     segments = StatisticsService.segment(name, dm.get_song(name), ["drums", "other"])
-    pauses = quiet_before_drop.get_pauses(name, dm.get_song(name))
     print("------------------PAUSES--------------------")
-    print(pauses)
     print("------------------SEGMENTS--------------------")
     for segment in segments:
         print(segment)
 
-name = "round"
-file_path = "round.mp3"
+name = "pause"
+file_path = "./songs/pause.mp3"
 lesgo(name, file_path)
 
 # with open(write_path, 'a') as file:

@@ -5,16 +5,13 @@ import DataService
 
 def get_pauses(name, data):
     print(f"Getting pauses for {name}")
-    drums_path = f"{data['demixed']}/drums.wav"
-    bass_path = f"{data['demixed']}/bass.wav"
-    other_path = f"{data['demixed']}/other.wav"
-    vocals_path = f"{data['demixed']}/vocals.wav"
 
+    struct = DataService.get_struct_data(name)
     # Calculate the RMS of the paths
-    drum_rms = StatisticsService.get_rms(path=drums_path)
-    bass_rms = StatisticsService.get_rms(path=bass_path)
-    other_rms = StatisticsService.get_rms(path=other_path)
-    vocals_rms = StatisticsService.get_rms(path=vocals_path)
+    drum_rms = struct["drums_rms"]
+    bass_rms = struct["bass_rms"]
+    other_rms = struct["other_rms"]
+    vocals_rms = struct["vocals_rms"]
     
     struct_data = DataService.get_struct_data(name)
     average_volume = struct_data["total_rms"]
@@ -25,10 +22,10 @@ def get_pauses(name, data):
     quiet_threshold_vocals = 0.15*average_volume
 
     # Find the quiet sections in each track
-    drum_quiet = drum_rms[0] < quiet_threshold_drums
-    bass_quiet = bass_rms[0] < quiet_threshold_bass
-    other_quiet = other_rms[0] < quiet_threshold_other
-    vocals_quiet = vocals_rms[0] < quiet_threshold_vocals
+    drum_quiet = [x < quiet_threshold_drums for x in drum_rms]
+    bass_quiet = [x < quiet_threshold_bass for x in bass_rms]
+    other_quiet = [x < quiet_threshold_other for x in other_rms]
+    vocals_quiet = [x < quiet_threshold_vocals for x in vocals_rms]
 
     combined_quiet = [0] * max(len(drum_quiet), len(bass_quiet), len(other_quiet), len(vocals_quiet))
     # Combine the quiet sections into a single array
@@ -75,9 +72,9 @@ def get_pauses(name, data):
     # for start_index, end_index in quiet_ranges:
     #     print('Quiet section from {} to {}'.format(start_index, end_index))
 
-    with open(f"./struct/{name}vocals.json", 'r') as f:
-        data = json.load(f)
+    data = DataService.get_struct_data(name)
     segments = data["segments"]
+
     # Sort the quiet_ranges in descending order of end time
     quiet_ranges.sort(key=lambda x: x[1], reverse=True)
     sr = 43
@@ -115,7 +112,7 @@ def get_pauses_for_segment(rms, threshold):
     # Define a threshold for what constitutes a "quiet" section
     quiet_threshold = threshold
     # Find the quiet sections in each track
-    quiet = rms < quiet_threshold
+    quiet = [x < quiet_threshold for x in rms]
     # Define the window size and the minimum number of quiet frames
     window_size = 50
     min_quiet_frames = 40
@@ -141,4 +138,5 @@ def get_pauses_for_segment(rms, threshold):
     # If the last section is quiet, add it to the list
     if start_index is not None:
         quiet_ranges.append((start_index, len(quiet_sections)))
+        print(quiet_ranges)
     return quiet_ranges
