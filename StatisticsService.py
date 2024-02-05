@@ -198,9 +198,9 @@ def update_struct(song_data, name=None, category=None, path=None, rms=False, par
             average_volumes = {"verse": verses_avg, "chorus": choruses_avg, "inst": inst_average}
         else:
             average_volumes = {"verse": verses_avg, "chorus": choruses_avg}
-        if choruses_avg > total_rms and chorusesdrum_average > drum_average:
+        if choruses_avg > total_rms:
             loud_sections.append(("chorus", choruses_avg))
-        if verses_avg > total_rms and versesdrum_average > drum_average:
+        if verses_avg > total_rms:
             loud_sections.append(("verse", verses_avg))
         if "inst" in labels:
             if inst_average > total_rms:
@@ -243,13 +243,19 @@ def segment(name, song_data, sectionby):
     chorus_sections = []
     added_sections = []
     i = 0
-    volume_threshold = struct_data["loud_sections_average"] * 0.07
+    volume_threshold = struct_data["loud_sections_average"] * 0.12
     print(f"Volume threshold: {volume_threshold}")
     for segment in segments:
-        if segment['label'] == 'start' or segment['label'] == 'bridge':
+        if segment["start"] in added_sections:
+            i+=1
+            continue
+        if segment['label'] == 'start':
             i+=1
             continue
         temp = {"seg_start": segment["start"], "seg_end": segment["end"], "label": segment["label"], "avg_volume": segment["avg_volume"], "avg_combined": segment["avg_combined"]}
+        if i > 0:
+            if segments[i-1]["start"] not in added_sections and segments[i - 1]["label"] == "bridge":
+                temp["after_bridge"] = True
         # if i > 0:
         #     if segments[i-1]["start"] in chorus_sections:
         #         i+=1
@@ -259,7 +265,7 @@ def segment(name, song_data, sectionby):
         segment_str = str(segment_start)
 
         volume_difference = segment["avg_combined"]-struct_data["loud_sections_average"]
-        print(f"Volume difference: {volume_difference}")
+        print(f"Volume difference: {volume_difference} at {segment['start']}")
         for section in rms_sections:
             go = False
             if section['end'] - section['start'] <= 395:
@@ -281,34 +287,70 @@ def segment(name, song_data, sectionby):
 
 
             if (segment["label"] in struct_data["loud_sections"] or segment["label"] in ["intro", "outro", "inst"]) and volume_difference >= -volume_threshold:
-                if segments[i+1]["label"] != "inst" and (segments[i+1]["label"] != segment["label"] or segment["end"] - segment["start"] >= 23):
-                    temp["section"] = section
-                    chorus_sections.append(temp)
-                    added_sections.append(segment_start)
-                    print(f"Segment start: {segment_start} added by in loud sections at {section}")
-                    break
-                elif segments[i+1]["avg_combined"] < segment["avg_combined"]:
+                if i < len(segments) - 1:
+                    if segments[i+1]["label"] != "inst":
+                        temp["section"] = section
+                        chorus_sections.append(temp)
+                        added_sections.append(segment_start)
+                        print(f"Segment start: {segment_start} added by in loud sections at {section}")
+                        break
+                    elif segments[i+1]["avg_combined"] < segment["avg_combined"]:
+                        temp["section"] = section
+                        chorus_sections.append(temp)
+                        added_sections.append(segment_start)
+                        print(f"Segment start: {segment_start} added by in loud sections at {section}")
+                        break
+                elif segment["avg_volume"]/struct_data["average_rms"] > 0.8:
                     temp["section"] = section
                     chorus_sections.append(temp)
                     added_sections.append(segment_start)
                     print(f"Segment start: {segment_start} added by in loud sections at {section}")
                     break
             elif segment["label"] in struct_data["average_volumes"]:
-                if segment["avg_combined"] - struct_data["average_volumes"][segment["label"]] >= -volume_threshold and volume_difference >= -volume_threshold:
-                    temp["section"] = section
-                    chorus_sections.append(temp)
-                    added_sections.append(segment_start)
-                    print(f"Segment start: {segment_start} added by in average volumes at {section}")
+                if segment["avg_combined"]/struct_data["average_volumes"][segment["label"]] > 1.1 and segment["avg_combined"] - struct_data["loud_sections_average"] >= -volume_threshold:
+                        temp["section"] = section
+                        chorus_sections.append(temp)
+                        added_sections.append(segment_start)
+                        print(f"Segment start: {segment_start} added by in loud sections at {section}")
+                        break
+            elif segment["label"] == "bridge" and segment["avg_combined"] - struct_data["loud_sections_average"] >= -volume_threshold:
+                print(f"Bridge at {segment['start']} being checked")
+                k = 0
+                indexes = []
+                add = False
+                while True:
+                    if segments[i + k]["label"] == "bridge":
+                        indexes.append(i + k)
+                        k += 1
+                        continue
+                    if segments[i + k]["avg_combined"] - struct_data["loud_sections_average"] <= -volume_threshold*1.3:
+                        add = True
+                        break
+                    else:
+                        break
+                if add:
+                    for index in indexes:
+                        temp = {"seg_start": segments[index]["start"], "seg_end": segments[index]["end"], "label": segments[index]["label"], "avg_volume": segments[index]["avg_volume"], "avg_combined": segments[index]["avg_combined"]}
+                        temp["section"] = section
+                        chorus_sections.append(temp)
+                        added_sections.append(segments[index]["start"])
+                        print(f"Segment start: {segments[index]['start']} added by faulty BRIDGE at {section}")
                     break
+            elif segment["label"] == "solo" and segment["avg_combined"] - struct_data["loud_sections_average"] >= -volume_threshold*0.5 and segment["avg_volume"] - struct_data["average_rms"] >= -volume_threshold*0.5:
+                temp["section"] = section
+                chorus_sections.append(temp)
+                added_sections.append(segment_start)
+                print(f"Segment start: {segment_start} added by in loud sections at {section}")
+                break
 
-            if section["category"] == "loud" and (segments[i-1]["label"] == segment["label"] or segment["label"] == "inst") and volume_difference >= -volume_threshold and segment_start not in added_sections:
-                if section["start"] <= 43 * segment_start <= section["end"] or abs(section["start"] - 43 * segment_start) <= 100:
-                    temp["section"] = section
-                    chorus_sections.append(temp)
-                    added_sections.append(segment_start)
-                    print(f"Segment start: {segment_start} added by VOLUME at {section}")
-                    break
-            if section["category"] == "loud" and segments[i-1]["label"] == "bridge" and (segment["label"] == "chorus" or segment["label"] == "inst"):
+            # if section["category"] == "loud" and (segments[i-1]["label"] == segment["label"] or segment["label"] == "inst") and volume_difference >= -volume_threshold and segment_start not in added_sections:
+            #     if section["start"] <= 43 * segment_start <= section["end"] or abs(section["start"] - 43 * segment_start) <= 100:
+            #         temp["section"] = section
+            #         chorus_sections.append(temp)
+            #         added_sections.append(segment_start)
+            #         print(f"Segment start: {segment_start} added by VOLUME at {section}")
+            #         break
+            if section["category"] == "loud" and segments[i-1]["label"] == "bridge" and (segment["label"] == "chorus" or segment["label"] == "inst") and volume_difference >= -volume_threshold and segment_start not in added_sections:
                 if section["start"] <= 43 * segment_start <= section["end"]:
                     temp["section"] = section
                     chorus_sections.append(temp)
@@ -316,46 +358,47 @@ def segment(name, song_data, sectionby):
                     print(f"Segment start: {segment_start} added by BRIDGE at {section}")
                     break
             if go:
-                print(f"Segment start: {segment_start} at {section} being checked")
-                if section['category'] == 'loud' and segment_start not in added_sections and volume_difference >= -volume_threshold:
-                    # Check if the start of the previous section is not in chorus_sectionsw
-                    if i < len(segments) - 1 and segments[i+1]['label'] != 'inst':
-                        if (i + 1 != len(segments) and segment["avg_combined"] - segments[i+1]["avg_combined"] >= -0.02) or segments[i+1]["label"] == "verse":
-                            if segments[i-1]['start'] not in added_sections:
-                                why = 5
-                                temp["section"] = section
-                                chorus_sections.append(temp)
-                                added_sections.append(segment_start)
-                                print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
-                                break
-                        # elif abs(start_difference) <= 100 and (i > 0 and segments[i-1]['start'] in chorus_sections) and (section_ids.get(segment_str, (0, 0))[1] - section_ids.get(segment_str, (0, 0))[0] >= 395):
-                        #     chorus_sections.remove(segments[i-1]['start'])
-                        #     chorus_sections.append(segment_start)
-                        #     section_ids[segment_str] = (section['start'], section['end'])
-                        #     print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
-                        #     break
-                            elif i == 0:
-                                temp["section"] = section
-                                chorus_sections.append(temp)
-                                added_sections.append(segment_start)
-                                why = 6
-                                print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
-                                break
-                            if segment["label"] == "inst":
-                                temp["section"] = section
-                                chorus_sections.append(temp)
-                                added_sections.append(segment_start)
-                                why =7
-                                print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
-                                break
-                    elif i + 1 != len(segments):
-                        if abs(start_difference) >= 100 and segment["avg_combined"] >= segments[i+1]["avg_combined"] or volume_difference <= volume_threshold or segment["avg_combined"] - segments[i-1]["avg_combined"] >= 0.035:
-                            temp["section"] = section
-                            chorus_sections.append(temp)
-                            added_sections.append(segment_start)
-                            why = 8
-                            print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
-                            break
+                pass
+                # print(f"Segment start: {segment_start} at {section} being checked")
+                # if section['category'] == 'loud' and segment_start not in added_sections and volume_difference >= -volume_threshold:
+                #     # Check if the start of the previous section is not in chorus_sectionsw
+                #     if i < len(segments) - 1 and segments[i+1]['label'] != 'inst':
+                #         if (i + 1 != len(segments) and segment["avg_combined"] - segments[i+1]["avg_combined"] >= -0.02) or segments[i+1]["label"] == "verse":
+                #             if segments[i-1]['start'] not in added_sections:
+                #                 why = 5
+                #                 temp["section"] = section
+                #                 chorus_sections.append(temp)
+                #                 added_sections.append(segment_start)
+                #                 print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
+                #                 break
+                #         # elif abs(start_difference) <= 100 and (i > 0 and segments[i-1]['start'] in chorus_sections) and (section_ids.get(segment_str, (0, 0))[1] - section_ids.get(segment_str, (0, 0))[0] >= 395):
+                #         #     chorus_sections.remove(segments[i-1]['start'])
+                #         #     chorus_sections.append(segment_start)
+                #         #     section_ids[segment_str] = (section['start'], section['end'])
+                #         #     print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
+                #         #     break
+                #             elif i == 0:
+                #                 temp["section"] = section
+                #                 chorus_sections.append(temp)
+                #                 added_sections.append(segment_start)
+                #                 why = 6
+                #                 print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
+                #                 break
+                #             if segment["label"] == "inst":
+                #                 temp["section"] = section
+                #                 chorus_sections.append(temp)
+                #                 added_sections.append(segment_start)
+                #                 why =7
+                #                 print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
+                #                 break
+                #     elif i + 1 != len(segments):
+                #         if abs(start_difference) >= 100 and segment["avg_combined"] >= segments[i+1]["avg_combined"] or volume_difference <= volume_threshold or segment["avg_combined"] - segments[i-1]["avg_combined"] >= 0.035:
+                #             temp["section"] = section
+                #             chorus_sections.append(temp)
+                #             added_sections.append(segment_start)
+                #             why = 8
+                #             print(f"Segment start: {segment_start} added by loud at {section} Start difference: {start_difference} End difference: {end_difference} why: {why}")
+                #             break
             elif section['start'] <= 43 * segment_start <= section['end'] and section['category'] == 'loud':
                 for pause in pauses:
                     if section["end"] - pause[0] <= 160 or (segment["label"] == "chorus" and segments[i + 1]["label"] != "inst") or abs(segment["avg_combined"] - struct_data["loud_sections_average"]) <= 0.025 or segment["avg_combined"] - segments[i-1]["avg_combined"] >= 0.035:

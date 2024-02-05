@@ -19,10 +19,10 @@ def get_pauses(name, data):
     struct_data = DataService.get_struct_data(name)
     average_volume = struct_data["total_rms"]
     # Define a threshold for what constitutes a "quiet" section
-    quiet_threshold_drums = 0.22*average_volume
-    quiet_threshold_bass = 0.22*average_volume
-    quiet_threshold_other = 0.22*average_volume
-    quiet_threshold_vocals = 0.22*average_volume
+    quiet_threshold_drums = 0.15*average_volume
+    quiet_threshold_bass = 0.15*average_volume
+    quiet_threshold_other = 0.15*average_volume
+    quiet_threshold_vocals = 0.15*average_volume
 
     # Find the quiet sections in each track
     drum_quiet = drum_rms[0] < quiet_threshold_drums
@@ -42,8 +42,8 @@ def get_pauses(name, data):
         if vocals_quiet[i]:
             combined_quiet[i] += 1
     # Define the window size and the minimum number of quiet frames
-    window_size = 15
-    min_quiet_frames = 8
+    window_size = 25
+    min_quiet_frames = 20
 
     # Initialize an array to hold the quiet sections
     quiet_sections = [0] * len(combined_quiet)
