@@ -26,7 +26,12 @@ parser = argparse.ArgumentParser(description="This is my Python script.")
 
 dm = DataService.DataManager()
 structurer = ShowStructurer.ShowStructurer(dm)
-structurer.test2("pause")
+queues = []
+queues.append(structurer.test2("pause"))
+queues.append(structurer.test("pause"))
+# queues.append(structurer.test3("pause"))
+structurer.combine(queues)
+
 # QLC_path = "kek"
 # DMX = DMXmanager.DMXmanager(QLC_path, structurer)
 # def lesgo(name, file):
