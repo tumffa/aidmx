@@ -26,19 +26,20 @@ parser = argparse.ArgumentParser(description="This is my Python script.")
 
 dm = DataService.DataManager()
 structurer = ShowStructurer.ShowStructurer(dm)
-QLC_path = "kek"
-DMX = DMXmanager.DMXmanager(QLC_path, structurer)
-def lesgo(name, file):
-    dm.extract_data(name, file)
-    segments = StatisticsService.segment(name, dm.get_song(name), ["drums", "other"])
-    print("------------------PAUSES--------------------")
-    print("------------------SEGMENTS--------------------")
-    for segment in segments:
-        print(segment)
+structurer.test2("pause")
+# QLC_path = "kek"
+# DMX = DMXmanager.DMXmanager(QLC_path, structurer)
+# def lesgo(name, file):
+#     dm.extract_data(name, file)
+#     segments = StatisticsService.segment(name, dm.get_song(name), ["drums", "other"])
+#     print("------------------PAUSES--------------------")
+#     print("------------------SEGMENTS--------------------")
+#     for segment in segments:
+#         print(segment)
 
-name = "pause"
-file_path = "./songs/pause.mp3"
-lesgo(name, file_path)
+# name = "pause"
+# file_path = "./songs/pause.mp3"
+# lesgo(name, file_path)
 
 # with open(write_path, 'a') as file:
 #     # Write a new line
