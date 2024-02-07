@@ -1,4 +1,5 @@
 import DataService
+import re
 
 class ShowStructurer:
     def __init__(self, data_manager):
@@ -37,6 +38,7 @@ class ShowStructurer:
         struct, song_data = self.get_songdata(name)
         show = Show(name, struct, song_data)
         self.shows[name] = show
+        return show
 
     def _setfixture(self, fixture, channel, value, comment=""):
         if value > 255:
@@ -46,6 +48,8 @@ class ShowStructurer:
         return f"setfixture:{fixture} ch:{channel} val:{value} //{comment}"
 
     def _wait(self, time, comment=""):
+        if time < 0:
+            time = 0
         return f"wait:{int(time)} //{comment}"
     
     def _blackout(self, mode, comment=""):
@@ -67,14 +71,11 @@ class ShowStructurer:
         dmx_angle = angle * rate
         return dmx_angle / time
 
-    def alternate(self, name, show, interval=None, length=30000.0):
+    def alternate(self, name, show, length=30000.0, start=0, queuename="alternate"):
         result = {}
         light_queue = Queue()
-        result["name"] = "light"
-        light_queue.enqueue(0)
-        struct, song_data = self.get_songdata(name)
-        show = Show(name, struct, song_data)
-        self.shows[name] = show
+        result["name"] = queuename
+        light_queue.enqueue(start)
         group1 = self.universe["above"]
         beatinterval = show.bpminterval
         time = length
@@ -107,13 +108,11 @@ class ShowStructurer:
         result["queue"] = light_queue
         return result
 
-    def spin(self, name, length=30000.0):
+    def spin(self, name, show, length=30000.0, start=0, queuename="spin"):
         result = {}
         spin_queue = Queue()
-        result["name"] = "spin"
-        spin_queue.enqueue(0)
-        struct, song_data = self.get_songdata(name)
-        show = Show(name, struct, song_data)
+        result["name"] = queuename
+        spin_queue.enqueue(start)
         self.shows[name] = show
         group1 = self.universe["above"]
         time = length
@@ -123,7 +122,7 @@ class ShowStructurer:
         pan_offset = 35
         tilt_offset = int(pan_offset * (fixture["tiltrange"]/fixture["panrange"])) + 10
         print(tilt_offset)
-        circle_time = 2 * show.beatinterval
+        circle_time = 2 * (60/128)
         panspeed = self.calculate_pan_speed(fixture, pan_offset, circle_time/4)
         print(panspeed)
         for fixture in group1.values():
@@ -187,11 +186,11 @@ class ShowStructurer:
         result["queue"] = spin_queue
         return result
 
-    def flood(self, name, interval=None, length=30000.0):
+    def flood(self, name, interval=None, length=30000.0, start=0, queuename="flood"):
         result = {}
         flood_queue = Queue()
-        result["name"] = "flood"
-        flood_queue.enqueue(0)
+        result["name"] = queuename
+        flood_queue.enqueue(start)
         struct, song_data = self.get_songdata(name)
         show = Show(name, struct, song_data)
         self.shows[name] = show
@@ -225,12 +224,64 @@ class ShowStructurer:
         result["queue"] = flood_queue
         return result
     
-    def pause(self, length, type="blackout"):
+    def pulse(self, name, show, dimmer=140, length=30000.0, start=0, queuename="pulse"):
         result = {}
-        result["name"] = "pause"
+        pulse_queue = Queue()
+        result["name"] = queuename
+        pulse_queue.enqueue(start)
+        struct, song_data = self.get_songdata(name)
+        show = Show(name, struct, song_data)
+        self.shows[name] = show
+        group = self.universe["above"]
+        time = length
+        switchinterval = (show.bpminterval/len(group))*1000*4
+        i = 1
+        while time > 1:
+            temp = []
+            for fixture in group.values():
+                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer, f"Dimmer reset"))
+            temp.append(self._setfixture(group[str(i)]["id"], group[str(i)]["dimmer"], 255, "Dimmer on"))
+            pulse_queue.enqueue(temp)
+            if time - switchinterval < 0:
+                switchinterval = time
+            time -= switchinterval
+            i += 1
+            if i > len(group):
+                i = 1
+            if time > 1:
+                pulse_queue.enqueue(switchinterval)
+        result["queue"] = pulse_queue
+        return result
+    
+    def idle(self, name, show, length=30000.0, start=0, queuename="idle"):
+        result = {}
+        idle_queue = Queue()
+        result["name"] = queuename
+        idle_queue.enqueue(start)
+        struct, song_data = self.get_songdata(name)
+        show = Show(name, struct, song_data)
+        self.shows[name] = show
+        group = self.universe["above"]
+        group2 = self.universe["flood"]
+        time = length
+        temp = []
+        for fixture in group2.values():
+            temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
+        for fixture in group.values():
+            temp.append(self._setfixture(fixture["id"], fixture["tilt"], 90, f"Tilt to 90"))
+            temp.append(self._setfixture(fixture["id"], fixture["pan"], 127, f"Pan to 127"))
+            temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
+            temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 140, f"Dimmer on 200"))
+        idle_queue.enqueue(temp)
+        result["queue"] = idle_queue
+        return result
+    
+    def pause(self, length, type="blackout", start=0, queuename="pause"):
+        result = {}
+        result["name"] = queuename
         if type == "blackout":
             blackout_queue = Queue()
-            blackout_queue.enqueue(0)
+            blackout_queue.enqueue(start)
             temp = []
             temp.append(self._blackout("on", f"Blackout for {length} seconds"))
             blackout_queue.enqueue(temp)
@@ -275,56 +326,114 @@ class ShowStructurer:
         return result
 
     def combine(self, queues):
+        waits = []
         command_queues = {}
         for queue in queues:
             command_queues[queue["name"]] = queue["queue"]
         times = {}
         for queue in queues:
             times[queue["name"]] = queue["queue"].dequeue()
-
+        index = 1
         while len(times) > 0:
-            print(times)
+            do_not_execute = []
             min_time = min(times.values())
             min_queues = [k for k, v in times.items() if v == min_time]
             if 'flood' in min_queues:
                 q = ('flood', min_time)
             else:
                 q = min_queues[0], min_time
-
+            if "pause" not in q[0]:
+                index2 = int(re.search(r'\d+$', q[0]).group())
+                if index2 > index:
+                    index = index2
+                elif index2 < index:
+                    for key in command_queues:
+                        key_index = int(re.search(r'\d+$', key).group())
+                        if key_index < index:
+                            do_not_execute.append(key)
             queue = command_queues[q[0]]
-            self._write(self._wait(q[1]))
+            self._write(self._wait(q[1], f"Wait for {q[0]}"))
             for name in times:
-                times[name] -= q[1]
+                times[name] -= (q[1]+3.4)
+
+                if times[name] < 0:
+                    times[name] = 0
             commands = queue.dequeue()
             if commands == None:
                 del times[q[0]]
                 del command_queues[q[0]]
                 continue
-            for command in commands:
-                self._write(command)
+            if q[0] not in do_not_execute:
+                for command in commands:
+                    self._write(command)
             wait = queue.dequeue()
             if wait:
                 times[q[0]] = wait
 
-    def generate_segment(self, name):
-        time = 15000.0
-        pauses = [(6, 7.6)]
+    def generate_segment(self, name, show, length, intensity, pauses):
         queues = []
-        queues.append(self.alternate(name, length=13000))
-        queues.append(self.spin(name, length=13000))
-        queues.append(self.flood(name, length=13000))
+        if intensity == 0:
+            for pause in pauses:
+                pausename = f"pause{str(pause[0])[:5]}"
+                print(pausename)
+                queues.append(self.pause((pause[1] - pause[0]), type="blackout", start=pause[0]*1000, pausename=pausename))
+            queues.append(self.idle(name, show=show))
+            queues.append(self.pulse(name, show=show, length=length))
+        elif intensity == 1:
+            for pause in pauses:
+                pausename = f"pause{str(pause[0])[:5]}"
+                print(pausename)
+                queues.append(self.pause((pause[1] - pause[0]), type="blackout", start=pause[0]*1000, pausename=pausename))
+            queues.append(self.alternate(name, show=show, length=length))
+            queues.append(self.spin(name, length=length))
+            queues.append(self.flood(name, length=length))
         self.combine(queues)
-        queues = []
-        queues.append(self.pause((7.8-6)))
-        self.combine(queues)
-        queues = []
-        queues.append(self.alternate(name, length=7000))
-        queues.append(self.spin(name, length=7000))
-        queues.append(self.flood(name, length=7000))
-        self.combine(queues)
+
 
     def generate_show(self, name):
+        queues = []
+        show = self.create_show(name)
+        sections = show.struct["chorus_sections"]
+        segments = show.struct["segments"]
 
+        pauses = show.struct["silent_ranges"]
+        for pause in pauses:
+            pause_start = pause[0] / 43
+            pause_end = pause[1] / 43
+            pausename = f"pause{str(pause[0])[:5]}"
+            queues.append(self.pause((pause_end - pause_start), type="blackout", queuename=pausename, start=pause_start*1000))
+
+        i = 0 
+        if segments[0]["label"] == "start":
+            i += 1
+        
+        for i in range(i, len(segments)):
+            found = False
+            for section in sections:
+
+                if segments[i]["start"] == section["seg_start"]:
+
+                    print("found")
+                    found = True
+                    length = (segments[i]["end"] - segments[i]["start"])*1000
+
+                    queues.append(self.alternate(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternate{i}"))
+                    queues.append(self.spin(name, show, length=length, start=segments[i]["start"]*1000, queuename=f"spin{i}"))
+                    queues.append(self.flood(name, length=length, start=segments[i]["start"]*1000, queuename=f"flood{i}"))
+
+                    i += 1
+                    break
+
+            if found == False:
+                
+                length = (segments[i]["end"] - segments[i]["start"])*1000
+                queues.append(self.idle(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"idle{i}"))
+                queues.append(self.pulse(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"pulse{i}"))
+                
+                i += 1
+        self.combine(queues)
+                
+            
 
 class Queue:
     def __init__(self):
@@ -360,5 +469,5 @@ class Show:
         self.struct = struct
         self.song_data = song_data
         self.mp3_path = song_data["file"]
-        self.bpminterval = 60 / (struct["bpm"]*1.04)
+        self.bpminterval = 60 / (struct["bpm"]*1.02)
         self.beatinterval = 60 / struct["bpm"]

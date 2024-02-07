@@ -25,10 +25,6 @@ parser = argparse.ArgumentParser(description="This is my Python script.")
 
 
 dm = DataService.DataManager()
-# structurer = ShowStructurer.ShowStructurer(dm)
-# queues = []
-# structurer.generate_segment("pause")
-
 
 def lesgo(name, file):
     dm.extract_data(name, file)
@@ -37,9 +33,13 @@ def lesgo(name, file):
     for segment in segments:
         print(segment)
 
-name = "pause"
-file_path = "./songs/pause.mp3"
+name = "ence"
+file_path = "./songs/ence.mp3"
 lesgo(name, file_path)
+
+structurer = ShowStructurer.ShowStructurer(dm)
+structurer.generate_show("ence")
+
 
 # with open(write_path, 'a') as file:
 #     # Write a new line
