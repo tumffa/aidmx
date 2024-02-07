@@ -5,22 +5,22 @@ class ShowStructurer:
         self.dm = data_manager
         self.shows = {}
         self.universe = {"above": {"1":{"id": 0, "dimmer": 7, "shutter": 8, "shutters": {"open": 255, "closed": 0, "flash": (10, 74), "fastflash": 35},
-                                         "pan": 0, "tilt": 2, "panrange": 360, "tiltrange": 220, "color": 5, "colors": {"red": 87, "yellow": 39, "green": 70, "fastflash": 183}, "movespeed": 4,},
+                                         "pan": 0, "tilt": 2, "panrange": 360, "tiltrange": 220, "color": 5, "colors": {"red": 87, "yellow": 39, "green": 70, "pink": 50, "fastflash": 183}, "movespeed": 4,},
 
                                    "2":{"id": 1, "dimmer": 7,  "shutter": 8, "shutters": {"open": 255, "closed": 0, "flash": (10, 74), "fastflash": 35}
-                                        ,"pan": 0, "tilt": 2, "panrange": 360, "tiltrange": 220, "color": 5, "colors": {"red": 87, "yellow": 39, "green": 70, "fastflash": 183}, "movespeed": 4},
+                                        ,"pan": 0, "tilt": 2, "panrange": 360, "tiltrange": 220, "color": 5, "colors": {"red": 87, "yellow": 39, "green": 70, "pink": 50, "fastflash": 183}, "movespeed": 4},
 
                                    "3":{"id": 2, "dimmer": 7,  "shutter": 8, "shutters": {"open": 255, "closed": 0, "flash": (10, 74), "fastflash": 35}
-                                        ,"pan": 0, "tilt": 2, "panrange": 360, "tiltrange": 220, "color": 5, "colors": {"red": 87, "yellow": 39, "green": 70, "fastflash": 183}, "movespeed": 4},
+                                        ,"pan": 0, "tilt": 2, "panrange": 360, "tiltrange": 220, "color": 5, "colors": {"red": 87, "yellow": 39, "green": 70, "pink": 50, "fastflash": 183}, "movespeed": 4},
 
                                     "4":{"id": 3, "dimmer": 7,  "shutter": 8, "shutters": {"open": 255, "closed": 0, "flash": (10, 74), "fastflash": 35}
-                                         ,"pan": 0, "tilt": 2, "panrange": 360, "tiltrange": 220, "color": 5, "colors": {"red": 87, "yellow": 39, "green": 70, "fastflash": 183}, "movespeed": 4},
+                                         ,"pan": 0, "tilt": 2, "panrange": 360, "tiltrange": 220, "color": 5, "colors": {"red": 87, "yellow": 39, "green": 70, "pink": 50, "fastflash": 183}, "movespeed": 4},
 
                                     "5":{"id": 4, "dimmer": 7,  "shutter": 8, "shutters": {"open": 255, "closed": 0, "flash": (10, 74), "fastflash": 35}
-                                         ,"pan": 0, "tilt": 2, "panrange": 360, "tiltrange": 220, "color": 5, "colors": {"red": 87, "yellow": 39, "green": 70, "fastflash": 183}, "movespeed": 4},
+                                         ,"pan": 0, "tilt": 2, "panrange": 360, "tiltrange": 220, "color": 5, "colors": {"red": 87, "yellow": 39, "green": 70, "pink": 50, "fastflash": 183}, "movespeed": 4},
         
                                     "6":{"id": 5, "dimmer": 7,  "shutter": 8, "shutters": {"open": 255, "closed": 0, "flash": (10, 74), "fastflash": 35}
-                                         ,"pan": 0, "tilt": 2, "panrange": 360, "tiltrange": 220, "color": 5, "colors": {"red": 87, "yellow": 39, "green": 70, "fastflash": 183}, "movespeed": 4}},
+                                         ,"pan": 0, "tilt": 2, "panrange": 360, "tiltrange": 220, "color": 5, "colors": {"red": 87, "yellow": 39, "green": 70, "pink": 50, "fastflash": 183}, "movespeed": 4}},
                         "flood": {"1":{"id": 6, "dimmer": 3}}
                                          }
         self.file = "showfile.txt"
@@ -46,9 +46,10 @@ class ShowStructurer:
         return f"setfixture:{fixture} ch:{channel} val:{value} //{comment}"
 
     def _wait(self, time, comment=""):
-        if time < 22:
-            time = 22
         return f"wait:{int(time)} //{comment}"
+    
+    def _blackout(self, mode, comment=""):
+        return f"blackout:{mode} //{comment}"
     
     def _write(self, line):
         with open(self.file, "a") as f:
@@ -66,7 +67,7 @@ class ShowStructurer:
         dmx_angle = angle * rate
         return dmx_angle / time
 
-    def test(self, name):
+    def test(self, name, interval=None, length=30000.0):
         result = {}
         light_queue = Queue()
         result["name"] = "light"
@@ -75,9 +76,10 @@ class ShowStructurer:
         show = Show(name, struct, song_data)
         self.shows[name] = show
         group1 = self.universe["above"]
-        time = 15000.0
+        beatinterval = show.bpminterval
+        time = length
         switch = 0
-        while time > 0:
+        while time > 1:
             temp = []
             for fixture in group1.values():
                 if switch == 0:
@@ -96,13 +98,16 @@ class ShowStructurer:
                         temp.append(line)
             switch = 1 - switch
             light_queue.enqueue(temp)
-            wait = show.beatinterval
-            light_queue.enqueue(wait*1000)
-            time -= (show.beatinterval)*1000
+            wait = beatinterval*1000
+            if time - wait < 0:
+                wait = time
+            time -= wait
+            if time > 1:
+                light_queue.enqueue(wait)
         result["queue"] = light_queue
         return result
 
-    def test2(self, name):
+    def test2(self, name, length=30000.0):
         result = {}
         spin_queue = Queue()
         result["name"] = "spin"
@@ -111,7 +116,7 @@ class ShowStructurer:
         show = Show(name, struct, song_data)
         self.shows[name] = show
         group1 = self.universe["above"]
-        time = 15000.0
+        time = length
         start_tilt = 23
         start_pan = 126
         fixture = group1["1"]
@@ -126,8 +131,8 @@ class ShowStructurer:
                 color = "yellow"
                 shutter = "open"
             else:
-                shutter = "fastflash"
-                color = "fastflash"
+                shutter = "open"
+                color = "pink"
             self._write(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"][shutter], "Open shutters"))
             self._write(self._setfixture(fixture["id"], fixture["color"], fixture["colors"][color], "Set color to fastflash"))
             #turn dimmer to full
@@ -139,7 +144,7 @@ class ShowStructurer:
         tilt = 0
         pans = {"0": 126, "1": 126, "2": 126, "3": 126, "4": 126, "5": 126}
         tilts = {"0": 30, "1": 30, "2": 30, "3": 30, "4": 30, "5": 30}
-        while time > 0:
+        while time > 1:
             temp = []
             for fixture in group1.values():
                 current_pan = pans[str(fixture["id"])]
@@ -173,13 +178,16 @@ class ShowStructurer:
             if tilt >= 2:
                 tilt = -2
             spin_queue.enqueue(temp)
-            time -= (circle_time/4)*1000
-            if time > 0:
-                spin_queue.enqueue((circle_time/4)*1000)
+            wait =  (circle_time/4)*1000
+            if time - wait < 0:
+                wait = time
+            time -= wait
+            if time > 1:
+                spin_queue.enqueue(wait)
         result["queue"] = spin_queue
         return result
 
-    def test3(self, name):
+    def test3(self, name, interval=None, length=30000.0):
         result = {}
         flood_queue = Queue()
         result["name"] = "flood"
@@ -188,29 +196,51 @@ class ShowStructurer:
         show = Show(name, struct, song_data)
         self.shows[name] = show
         group = self.universe["flood"]
-        time = 15000.0
-        beatinterval = show.beatinterval
-        lightvalue = 0
-        wait = beatinterval/20
-        if wait < 22/1000:
-            wait = 22/1000
+        time = length
+        if interval:
+            beatinterval = interval
+        else:
+            beatinterval = show.bpminterval
+        print(beatinterval)
+        lightvalue = 255
+        wait = beatinterval * 1000  # Adjust wait to be equal to the beat interval in milliseconds
         #make the flood light flash and go down to 0 every beat
-        while time > 0:
+        while time > 1:
             temp = []
             if lightvalue <= 0:
                 lightvalue = 255
                 line = self._setfixture(group["1"]["id"], group["1"]["dimmer"], lightvalue, f"{time}")
                 temp.append(line)
             else:
-                lightvalue -= 255*wait
+                lightvalue -= 255/(1000*beatinterval/wait)
+                print(lightvalue)
                 line = self._setfixture(group["1"]["id"], group["1"]["dimmer"], lightvalue, f"{time}")
                 temp.append(line)
             flood_queue.enqueue(temp)
-            flood_queue.enqueue(wait*1000)
-            time -= wait*1000
+            if time - wait < 0:
+                wait = time
+            time -= wait
+            if time > 1:
+                flood_queue.enqueue(wait)
         result["queue"] = flood_queue
         return result
-
+    
+    def pause(self, length, type="blackout"):
+        result = {}
+        result["name"] = "pause"
+        if type == "blackout":
+            blackout_queue = Queue()
+            blackout_queue.enqueue(0)
+            temp = []
+            temp.append(self._blackout("on", f"Blackout for {length} seconds"))
+            blackout_queue.enqueue(temp)
+            wait = length * 1000
+            blackout_queue.enqueue(wait)
+            temp = []
+            temp.append(self._blackout("off", f"Blackout off"))
+            blackout_queue.enqueue(temp)
+            result["queue"] = blackout_queue
+        return result
 
     def combine(self, queues):
         command_queues = {}
@@ -222,7 +252,13 @@ class ShowStructurer:
 
         while len(times) > 0:
             print(times)
-            q = min(times.items(), key=lambda x: x[1])
+            min_time = min(times.values())
+            min_queues = [k for k, v in times.items() if v == min_time]
+            if 'flood' in min_queues:
+                q = ('flood', min_time)
+            else:
+                q = min_queues[0], min_time
+
             queue = command_queues[q[0]]
             self._write(self._wait(q[1]))
             for name in times:
@@ -237,6 +273,23 @@ class ShowStructurer:
             wait = queue.dequeue()
             if wait:
                 times[q[0]] = wait
+
+    def generate_segment(self, name):
+        time = 15000.0
+        pauses = [(6, 8)]
+        queues = []
+        queues.append(self.test(name, length=13000))
+        queues.append(self.test2(name, length=13000))
+        queues.append(self.test3(name, length=13000))
+        self.combine(queues)
+        queues = []
+        queues.append(self.pause((8-6)))
+        self.combine(queues)
+        queues = []
+        queues.append(self.test(name, length=7000))
+        queues.append(self.test2(name, length=7000))
+        queues.append(self.test3(name, length=7000))
+        self.combine(queues)
 
 class Queue:
     def __init__(self):
@@ -272,4 +325,5 @@ class Show:
         self.struct = struct
         self.song_data = song_data
         self.mp3_path = song_data["file"]
+        self.bpminterval = 60 / (struct["bpm"]*1.04)
         self.beatinterval = 60 / struct["bpm"]

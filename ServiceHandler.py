@@ -27,10 +27,7 @@ parser = argparse.ArgumentParser(description="This is my Python script.")
 dm = DataService.DataManager()
 structurer = ShowStructurer.ShowStructurer(dm)
 queues = []
-queues.append(structurer.test2("pause"))
-queues.append(structurer.test("pause"))
-# queues.append(structurer.test3("pause"))
-structurer.combine(queues)
+structurer.generate_segment("pause")
 
 # QLC_path = "kek"
 # DMX = DMXmanager.DMXmanager(QLC_path, structurer)
