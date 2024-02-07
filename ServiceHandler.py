@@ -33,12 +33,12 @@ def lesgo(name, file):
     for segment in segments:
         print(segment)
 
-name = "ence"
-file_path = "./songs/ence.mp3"
+name = "pause"
+file_path = f"./songs/{name}.mp3"
 lesgo(name, file_path)
 
 structurer = ShowStructurer.ShowStructurer(dm)
-structurer.generate_show("ence")
+structurer.generate_show(name)
 
 
 # with open(write_path, 'a') as file:

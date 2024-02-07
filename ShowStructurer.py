@@ -185,6 +185,41 @@ class ShowStructurer:
                 spin_queue.enqueue(wait)
         result["queue"] = spin_queue
         return result
+    
+    def swing(self, name, show, length=30000.0, start=0, queuename="swing"):
+        result = {}
+        swing_queue = Queue()
+        result["name"] = queuename
+        swing_queue.enqueue(start)
+        group = self.universe["above"]
+        time = length
+        beatinterval = show.bpminterval
+        tiltspeed = self.calculate_tilt_speed(group["1"], 80, beatinterval)
+        while time > 1:
+            temp = []
+            switch = 0
+            for fixture in group.values():
+                temp.append(self._setfixture(fixture["id"], fixture["movespeed"], tiltspeed, f"Set move speed"))
+                if switch == 0:
+                    if int(fixture["id"]) % 2 == 0:
+                        temp.append(self._setfixture(fixture["id"], fixture["tilt"], 80, f"Tilt to 80"))
+                    else:
+                        temp.append(self._setfixture(fixture["id"], fixture["tilt"], 0, f"Tilt to 80"))
+                else:
+                    if int(fixture["id"]) % 2 == 0:
+                        temp.append(self._setfixture(fixture["id"], fixture["tilt"], 0, f"Tilt to 0"))
+                    else:
+                        temp.append(self._setfixture(fixture["id"], fixture["tilt"], 80, f"Tilt to 0"))
+            switch = 1 - switch
+            swing_queue.enqueue(temp)
+            wait = beatinterval*1000
+            if time - wait < 0:
+                wait = time
+            time -= wait
+            if time > 1:
+                swing_queue.enqueue(wait)
+        result["queue"] = swing_queue
+        return result
 
     def flood(self, name, interval=None, length=30000.0, start=0, queuename="flood"):
         result = {}
@@ -325,8 +360,7 @@ class ShowStructurer:
             result["queue"] = beam_queue
         return result
 
-    def combine(self, queues):
-        waits = []
+    def combine(self, queues, bpm):
         command_queues = {}
         for queue in queues:
             command_queues[queue["name"]] = queue["queue"]
@@ -354,7 +388,7 @@ class ShowStructurer:
             queue = command_queues[q[0]]
             self._write(self._wait(q[1], f"Wait for {q[0]}"))
             for name in times:
-                times[name] -= (q[1]+3.4)
+                times[name] -= q[1]+(3.4)
 
                 if times[name] < 0:
                     times[name] = 0
@@ -376,7 +410,7 @@ class ShowStructurer:
             for pause in pauses:
                 pausename = f"pause{str(pause[0])[:5]}"
                 print(pausename)
-                queues.append(self.pause((pause[1] - pause[0]), type="blackout", start=pause[0]*1000, pausename=pausename))
+                queues.append(self.pause((pause[1] - pause[0]), type="beams", start=pause[0]*1000, pausename=pausename))
             queues.append(self.idle(name, show=show))
             queues.append(self.pulse(name, show=show, length=length))
         elif intensity == 1:
@@ -418,7 +452,7 @@ class ShowStructurer:
                     length = (segments[i]["end"] - segments[i]["start"])*1000
 
                     queues.append(self.alternate(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternate{i}"))
-                    queues.append(self.spin(name, show, length=length, start=segments[i]["start"]*1000, queuename=f"spin{i}"))
+                    queues.append(self.swing(name, show, length=length, start=segments[i]["start"]*1000, queuename=f"spin{i}"))
                     queues.append(self.flood(name, length=length, start=segments[i]["start"]*1000, queuename=f"flood{i}"))
 
                     i += 1
@@ -431,7 +465,7 @@ class ShowStructurer:
                 queues.append(self.pulse(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"pulse{i}"))
                 
                 i += 1
-        self.combine(queues)
+        self.combine(queues, show.bpm)
                 
             
 
@@ -468,6 +502,7 @@ class Show:
         self.name = name
         self.struct = struct
         self.song_data = song_data
+        self.bpm = struct["bpm"]
         self.mp3_path = song_data["file"]
         self.bpminterval = 60 / (struct["bpm"]*1.02)
         self.beatinterval = 60 / struct["bpm"]
