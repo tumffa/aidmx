@@ -12,24 +12,27 @@ def get_pauses(name, data):
     bass_rms = struct["bass_rms"]
     other_rms = struct["other_rms"]
     vocals_rms = struct["vocals_rms"]
+    rms = struct["rms"]
     
     struct_data = DataService.get_struct_data(name)
     average_volume = struct_data["total_rms"]
     # Define a threshold for what constitutes a "quiet" section
-    quiet_threshold_drums = 0.15*average_volume
-    quiet_threshold_bass = 0.15*average_volume
-    quiet_threshold_other = 0.15*average_volume
-    quiet_threshold_vocals = 0.15*average_volume
-
+    quiet_threshold_drums = 0.2*struct_data["drums_average"]
+    quiet_threshold_bass = 0.2*struct_data["bass_average"]
+    quiet_threshold_other = 0.2*struct_data["other_average"]
+    quiet_threshold_vocals = 0.2*struct_data["vocals_average"]
+    quiet_threshold_rms = 0.2*average_volume
+    
     # Find the quiet sections in each track
     drum_quiet = [x < quiet_threshold_drums for x in drum_rms]
     bass_quiet = [x < quiet_threshold_bass for x in bass_rms]
     other_quiet = [x < quiet_threshold_other for x in other_rms]
     vocals_quiet = [x < quiet_threshold_vocals for x in vocals_rms]
+    rms_quiet = [x < quiet_threshold_rms for x in rms]
 
     combined_quiet = [0] * max(len(drum_quiet), len(bass_quiet), len(other_quiet), len(vocals_quiet))
     # Combine the quiet sections into a single array
-    for i in range(max(len(drum_quiet), len(bass_quiet), len(other_quiet), len(vocals_quiet))):
+    for i in range(max(len(drum_quiet), len(bass_quiet), len(other_quiet), len(vocals_quiet), len(rms_quiet))):
         if drum_quiet[i]:
             combined_quiet[i] += 1
         if bass_quiet[i]:
@@ -38,8 +41,10 @@ def get_pauses(name, data):
             combined_quiet[i] += 1
         if vocals_quiet[i]:
             combined_quiet[i] += 1
+        if rms_quiet[i]:
+            combined_quiet[i] += 1
     # Define the window size and the minimum number of quiet frames
-    window_size = 25
+    window_size = 22
     min_quiet_frames = 20
 
     # Initialize an array to hold the quiet sections
@@ -48,7 +53,7 @@ def get_pauses(name, data):
     # For each window of frames
     for i in range(len(combined_quiet) - window_size + 1):
         # Count how many frames in the window are quiet
-        quiet_count = sum(1 for j in range(i, i + window_size) if combined_quiet[j] >= 2)
+        quiet_count = sum(1 for j in range(i, i + window_size) if combined_quiet[j] >= 3)
         
         # If at least min_quiet_frames are quiet, mark the entire window as a quiet section
         if quiet_count >= min_quiet_frames:
@@ -68,45 +73,17 @@ def get_pauses(name, data):
     # If the last section is quiet, add it to the list
     if start_index is not None:
         quiet_ranges.append((start_index, len(quiet_sections)))
-
-    # for start_index, end_index in quiet_ranges:
-    #     print('Quiet section from {} to {}'.format(start_index, end_index))
-
-    data = DataService.get_struct_data(name)
-    segments = data["segments"]
-
-    # Sort the quiet_ranges in descending order of end time
-    quiet_ranges.sort(key=lambda x: x[1], reverse=True)
-    sr = 43
-    # Initialize a list to hold the silent parts that precede a segment change
     silent_pre_segments = []
-
-    # Initialize a variable to hold the last quiet range added
-    last_quiet_range = None
-    # For each segment
-    for segment in segments:
-        # Convert the segment start time to frames
-        segment_start_frame = int(segment['start'] * sr)
-        #1858 to 1975
-        # Find the preceding quiet range
-        for i in range(len(quiet_ranges)):
-            # Calculate the difference in frames between the segment start and the end of the quiet range
-            diff_frames1 = abs(segment_start_frame - quiet_ranges[i][1])
-            diff_frames2 = abs(segment_start_frame - quiet_ranges[i][0])
-            # print(f"Comparing {segment_start_frame} to {quiet_ranges[i]} with diff {diff_frames1} and {diff_frames2} with volume {drum_rms[0][i]}")
-            
-            # Convert 2.5 seconds to frames
-            diff_frames_threshold = int(1.5 * sr)
-            
-            # If the quiet range ends before the segment starts and it's not the same as the last one added
-            # and the difference in frames is less than or equal to the threshold
-            if (last_quiet_range is None or quiet_ranges[i] != last_quiet_range) and (diff_frames1 <= diff_frames_threshold or diff_frames2 <= diff_frames_threshold):
-                # Add it to the list and update last_quiet_range
-                silent_pre_segments.append(quiet_ranges[i])
-                last_quiet_range = quiet_ranges[i]
+    for section in quiet_ranges:
+        for segment in struct["segments"]:
+            if abs(segment["start"]*43 - section[1]) < 100: 
+                silent_pre_segments.append(section)
                 break
-            
-    return silent_pre_segments
+    print("------------------PAUSES--------------------")        
+    print(silent_pre_segments)
+    print("------------------PAUSE RANGES--------------------")
+    print(quiet_ranges)
+    return silent_pre_segments, quiet_ranges
 
 def get_pauses_for_segment(rms, threshold):
     # Define a threshold for what constitutes a "quiet" section

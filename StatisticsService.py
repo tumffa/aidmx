@@ -18,7 +18,16 @@ def initialize_rms(song_data, name):
     other_rms = [float(x) for x in get_rms(song_data, category=["other"])[0]]
     vocals_rms = [float(x) for x in get_rms(song_data, category=["vocals"])[0]]
     total_rms = sum(rms) / len(rms)
-    DataService.update_struct_data(name=name, params=[{"total_rms": total_rms, 'rms': rms, 'bass_rms': bass_rms, 'drums_rms': drums_rms, 'other_rms': other_rms, 'vocals_rms': vocals_rms}], indent=2)
+    bass_average = sum(bass_rms) / len(bass_rms)
+    drums_average = sum(drums_rms) / len(drums_rms)
+    other_average = sum(other_rms) / len(other_rms)
+    vocals_average = sum(vocals_rms) / len(vocals_rms)
+
+    DataService.update_struct_data(name=name, params=[{"total_rms": total_rms, 'rms': rms,
+                                                        'bass_rms': bass_rms, 'drums_rms': drums_rms,
+                                                          'other_rms': other_rms, 'vocals_rms': vocals_rms,
+                                                            'bass_average': bass_average, 'drums_average': drums_average,
+                                                              'other_average': other_average, 'vocals_average': vocals_average}])
 
 def get_rms(song_data=None, category=None, path=None)->tuple[list[float], float]:
     # Load the segment data from the JSON file
@@ -254,7 +263,7 @@ def segment(name, song_data, sectionby):
     print(rms_sections)
     # Load the structure data from the JSON file
     struct_data = DataService.get_struct_data(name)
-    pauses = quiet_before_drop.get_pauses(name, song_data)
+    pauses, silent_ranges = quiet_before_drop.get_pauses(name, song_data)
 
     # Find the start times of the choruses
     segments = struct_data['segments']
@@ -441,7 +450,7 @@ def segment(name, song_data, sectionby):
                                 print(f"Segment start: {segment_start} added by pause {pause} at {section}")
         i += 1
 
-    update_struct(song_data, name=name, params=[{'chorus_sections': chorus_sections, "pauses": pauses}])
+    update_struct(song_data, name=name, params=[{'chorus_sections': chorus_sections, "pauses": pauses, "silent_ranges": silent_ranges}])
     return chorus_sections
 
 def merge_short_sections(sections):

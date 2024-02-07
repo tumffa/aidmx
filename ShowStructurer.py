@@ -67,7 +67,7 @@ class ShowStructurer:
         dmx_angle = angle * rate
         return dmx_angle / time
 
-    def test(self, name, interval=None, length=30000.0):
+    def alternate(self, name, show, interval=None, length=30000.0):
         result = {}
         light_queue = Queue()
         result["name"] = "light"
@@ -107,7 +107,7 @@ class ShowStructurer:
         result["queue"] = light_queue
         return result
 
-    def test2(self, name, length=30000.0):
+    def spin(self, name, length=30000.0):
         result = {}
         spin_queue = Queue()
         result["name"] = "spin"
@@ -187,7 +187,7 @@ class ShowStructurer:
         result["queue"] = spin_queue
         return result
 
-    def test3(self, name, interval=None, length=30000.0):
+    def flood(self, name, interval=None, length=30000.0):
         result = {}
         flood_queue = Queue()
         result["name"] = "flood"
@@ -202,7 +202,7 @@ class ShowStructurer:
         else:
             beatinterval = show.bpminterval
         print(beatinterval)
-        lightvalue = 255
+        lightvalue = 0
         wait = beatinterval * 1000  # Adjust wait to be equal to the beat interval in milliseconds
         #make the flood light flash and go down to 0 every beat
         while time > 1:
@@ -240,6 +240,38 @@ class ShowStructurer:
             temp.append(self._blackout("off", f"Blackout off"))
             blackout_queue.enqueue(temp)
             result["queue"] = blackout_queue
+
+        if type == "beams":
+            result = {}
+            result["name"] = "pause"
+            group = self.universe["above"]
+            floodgroup = self.universe["flood"]
+            beam_queue = Queue()
+            beam_queue.enqueue(0)
+            temp = []
+            wait = 200
+            time = length*1000 - wait
+            speed = self.calculate_tilt_speed(group["1"], 74, time/1000)
+            for fixture in floodgroup.values():
+                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
+            beam_queue.enqueue(temp)
+            beam_queue.enqueue(0)
+            temp = []
+            for fixture in group.values():
+                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
+                temp.append(self._setfixture(fixture["id"], fixture["movespeed"], 255, f"Set move speed"))
+                temp.append(self._setfixture(fixture["id"], fixture["pan"], 127, f"Pan to 127"))
+                temp.append(self._setfixture(fixture["id"], fixture["tilt"], 100, f"Tilt to 100"))
+            beam_queue.enqueue(temp)
+            beam_queue.enqueue(wait)
+            temp = []
+            for fixture in group.values():
+                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"Dimmer on"))
+                temp.append(self._setfixture(fixture["id"], fixture["movespeed"], speed, f"Set move speed"))
+                temp.append(self._setfixture(fixture["id"], fixture["tilt"], 0, f"Tilt to 0"))
+            beam_queue.enqueue(temp)
+            beam_queue.enqueue(time)
+            result["queue"] = beam_queue
         return result
 
     def combine(self, queues):
@@ -276,20 +308,23 @@ class ShowStructurer:
 
     def generate_segment(self, name):
         time = 15000.0
-        pauses = [(6, 8)]
+        pauses = [(6, 7.6)]
         queues = []
-        queues.append(self.test(name, length=13000))
-        queues.append(self.test2(name, length=13000))
-        queues.append(self.test3(name, length=13000))
+        queues.append(self.alternate(name, length=13000))
+        queues.append(self.spin(name, length=13000))
+        queues.append(self.flood(name, length=13000))
         self.combine(queues)
         queues = []
-        queues.append(self.pause((8-6)))
+        queues.append(self.pause((7.8-6)))
         self.combine(queues)
         queues = []
-        queues.append(self.test(name, length=7000))
-        queues.append(self.test2(name, length=7000))
-        queues.append(self.test3(name, length=7000))
+        queues.append(self.alternate(name, length=7000))
+        queues.append(self.spin(name, length=7000))
+        queues.append(self.flood(name, length=7000))
         self.combine(queues)
+
+    def generate_show(self, name):
+
 
 class Queue:
     def __init__(self):
