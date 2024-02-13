@@ -33,7 +33,7 @@ def lesgo(name, file):
     for segment in segments:
         print(segment)
 
-name = "hail"
+name = "edamame"
 file_path = f"./songs/{name}.mp3"
 lesgo(name, file_path)
 

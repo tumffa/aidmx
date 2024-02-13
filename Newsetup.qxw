@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Workspace>
+<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="FixtureManager">
+ <Creator>
+  <Name>Q Light Controller Plus</Name>
+  <Version>4.12.7</Version>
+  <Author>tuoma</Author>
+ </Creator>
+ <Engine>
+  <InputOutputMap>
+   <Universe Name="Universe 1" ID="0">
+    <Output Plugin="ArtNet" UID="2.100.100.1" Line="6"/>
+   </Universe>
+   <Universe Name="Universe 2" ID="1">
+    <Output Plugin="ArtNet" UID="127.0.0.1" Line="0"/>
+   </Universe>
+   <Universe Name="Universe 3" ID="2"/>
+   <Universe Name="Universe 4" ID="3"/>
+  </InputOutputMap>
+  <Fixture>
+   <Manufacturer>Eurolite</Manufacturer>
+   <Model>LED Strobe SMD PRO 132 DMX RGB</Model>
+   <Mode>6CH</Mode>
+   <ID>0</ID>
+   <Name>LED Strobe SMD PRO 132 DMX RGB</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>6</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Eurolite</Manufacturer>
+   <Model>LED PAR 56 RGB DMX</Model>
+   <Mode>5 Channels</Mode>
+   <ID>1</ID>
+   <Name>LED PAR 56 RGB DMX #1</Name>
+   <Universe>0</Universe>
+   <Address>6</Address>
+   <Channels>5</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Eurolite</Manufacturer>
+   <Model>LED PAR 56 RGB DMX</Model>
+   <Mode>5 Channels</Mode>
+   <ID>2</ID>
+   <Name>LED PAR 56 RGB DMX #2</Name>
+   <Universe>0</Universe>
+   <Address>11</Address>
+   <Channels>5</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Eurolite</Manufacturer>
+   <Model>LED PAR 56 RGB DMX</Model>
+   <Mode>5 Channels</Mode>
+   <ID>3</ID>
+   <Name>LED PAR 56 RGB DMX #3</Name>
+   <Universe>0</Universe>
+   <Address>16</Address>
+   <Channels>5</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Eurolite</Manufacturer>
+   <Model>LED PAR 56 RGB DMX</Model>
+   <Mode>5 Channels</Mode>
+   <ID>4</ID>
+   <Name>LED PAR 56 RGB DMX #4</Name>
+   <Universe>0</Universe>
+   <Address>21</Address>
+   <Channels>5</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Eurolite</Manufacturer>
+   <Model>LED Strobe SMD PRO 132 DMX RGB</Model>
+   <Mode>6CH</Mode>
+   <ID>5</ID>
+   <Name>LED Strobe SMD PRO 132 DMX RGB</Name>
+   <Universe>0</Universe>
+   <Address>26</Address>
+   <Channels>6</Channels>
+  </Fixture>
+  <Monitor DisplayMode="0" ShowLabels="0">
+   <Font>Arial,12,-1,5,50,0,0,0,0,0</Font>
+   <ChannelStyle>0</ChannelStyle>
+   <ValueStyle>0</ValueStyle>
+   <Grid Width="5" Height="3" Depth="5" Units="0"/>
+  </Monitor>
+ </Engine>
+ <VirtualConsole>
+  <Frame Caption="">
+   <Appearance>
+    <FrameStyle>None</FrameStyle>
+    <ForegroundColor>Default</ForegroundColor>
+    <BackgroundColor>Default</BackgroundColor>
+    <BackgroundImage>None</BackgroundImage>
+    <Font>Default</Font>
+   </Appearance>
+   <Button Caption="New Chaser 2" ID="0" Icon="">
+    <WindowState Visible="False" X="45" Y="500" Width="50" Height="50"/>
+    <Appearance>
+     <FrameStyle>None</FrameStyle>
+     <ForegroundColor>Default</ForegroundColor>
+     <BackgroundColor>Default</BackgroundColor>
+     <BackgroundImage>None</BackgroundImage>
+     <Font>Default</Font>
+    </Appearance>
+    <Function ID="4294967295"/>
+    <Action>Toggle</Action>
+    <Key>1</Key>
+    <Intensity Adjust="False">100</Intensity>
+   </Button>
+  </Frame>
+  <Properties>
+   <Size Width="1920" Height="1080"/>
+   <GrandMaster ChannelMode="Intensity" ValueMode="Reduce" SliderMode="Normal"/>
+  </Properties>
+ </VirtualConsole>
+ <SimpleDesk>
+  <Engine/>
+ </SimpleDesk>
+</Workspace>

@@ -1,5 +1,8 @@
 import DataService
+import QLCService
 import re
+import random
+from QLCService import QXWHandler
 
 class ShowStructurer:
     def __init__(self, data_manager):
@@ -7,24 +10,24 @@ class ShowStructurer:
         self.shows = {}
         self.universe = {"abovewash": 
                          {"1": {"id": 1, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                                "shutter": 4, "shutters": {"open": 0}},
+                                "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 110},
 
                                    "2": {"id": 2, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                                         "shutter": 4, "shutters": {"open": 0}},
+                                         "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 110},
 
                                    "3": {"id": 3, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                                         "shutter": 4, "shutters": {"open": 0}},
+                                         "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 110},
 
                                    "4": {"id": 4, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                                          "shutter": 4, "shutters": {"open": 0}}
+                                          "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 110}
                                    },
 
-                        "flood": 
+                        "strobe": 
                         {"1": {"id": 0, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": (130, 249),
-                                "shutter": 2, "shutters": {"open": 0, "closed": 7}},
+                                "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 110},
 
                          "2": {"id": 5, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": (130, 249),
-                                "shutter": 2, "shutters": {"open": 0, "closed": 7}}
+                                "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 110}
                         }
         }         
         self.file = "showfile.txt"
@@ -137,7 +140,7 @@ class ShowStructurer:
         return temp
     
 
-    def alternate(self, name, show, length=30000.0, start=0, queuename="alternate1"):
+    def alternate(self, name, show, length=30000.0, start=0, queuename="alternate0"):
         result = {}
         light_queue = Queue()
         result["name"] = queuename
@@ -174,7 +177,7 @@ class ShowStructurer:
         result["queue"] = light_queue
         return result
 
-    def spin(self, name, show, length=30000.0, start=0, queuename="spin1"):
+    def spin(self, name, show, length=30000.0, start=0, queuename="spin0"):
         result = {}
         spin_queue = Queue()
         result["name"] = queuename
@@ -252,7 +255,7 @@ class ShowStructurer:
         result["queue"] = spin_queue
         return result
     
-    def swing(self, name, show, length=30000.0, start=0, queuename="swing1"):
+    def swing(self, name, show, length=30000.0, start=0, queuename="swing0"):
         result = {}
         swing_queue = Queue()
         result["name"] = queuename
@@ -311,15 +314,26 @@ class ShowStructurer:
         result["queue"] = swing_queue
         return result
 
-    def flood(self, name, interval=None, length=30000.0, start=0, queuename="flood1"):
+    def flood(self, name, show, interval=None, length=30000.0, start=0, queuename="flood0", color="white"):
         result = {}
         flood_queue = Queue()
         result["name"] = queuename
         flood_queue.enqueue(start)
         struct, song_data = self.get_songdata(name)
-        show = Show(name, struct, song_data)
         self.shows[name] = show
-        group = self.universe["flood"]
+        floodexists = False
+        groups = []
+        if "flood" in self.universe:
+            group1 = self.universe["flood"]
+            floodexists = True
+            groups.append(group)
+        else:
+            if "abovewash" in self.universe:
+                group1 = self.universe["abovewash"]
+                groups.append(group1)
+            if "strobe" in self.universe:
+                group2 = self.universe["strobe"]
+                groups.append(group2)
         time = length
         if interval:
             beatinterval = interval
@@ -335,9 +349,12 @@ class ShowStructurer:
                     lightvalue = 255
             else:
                 lightvalue -= 255/(1000*beatinterval/wait)
-            for fixture in group.values():
-                line = self._setfixture(fixture["id"], fixture["dimmer"], lightvalue, f"{time}")
-                temp.append(line)
+            for group in groups:
+                for fixture in group.values():
+                    colors = self.calculate_colors(fixture, color)
+                    temp += colors
+                    temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
+                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], lightvalue, f"{time}"))
             flood_queue.enqueue(temp)
             if time - wait < 0:
                 wait = time
@@ -347,7 +364,7 @@ class ShowStructurer:
         result["queue"] = flood_queue
         return result
     
-    def pulse(self, name, show, intervalmod=1, dimmer1=255, dimmer2=100, color1="white", color2="white", length=30000.0, start=0, queuename="pulse1"):
+    def pulse(self, name, show, intervalmod=1, dimmer1=255, dimmer2=100, color1="white", color2="white", length=30000.0, start=0, queuename="pulse0"):
         result = {}
         pulse_queue = Queue()
         result["name"] = queuename
@@ -378,7 +395,7 @@ class ShowStructurer:
         result["queue"] = pulse_queue
         return result
     
-    def idle(self, name, show, length=30000.0, start=0, queuename="idle1"):
+    def idle(self, name, show, length=30000.0, start=0, queuename="idle0"):
         result = {}
         idle_queue = Queue()
         result["name"] = queuename
@@ -389,15 +406,22 @@ class ShowStructurer:
         group = None
         if "abovemoving" in self.universe:
             group = self.universe["abovemoving"]
-        group2 = self.universe["flood"]
+        else:
+            if "abovewash" in self.universe:
+                group = self.universe["abovewash"]
+        if "flood" in self.universe:
+            group2 = self.universe["flood"]
+        elif "strobe" in self.universe:
+            group2 = self.universe["strobe"]
         time = length
         temp = []
         for fixture in group2.values():
             temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 100, f"Dimmer off"))
         if group is not None:
             for fixture in group.values():
-                temp.append(self._setfixture(fixture["id"], fixture["tilt"], 90, f"Tilt to 90"))
-                temp.append(self._setfixture(fixture["id"], fixture["pan"], 127, f"Pan to 127"))
+                if "abovemoving" in self.universe:
+                    temp.append(self._setfixture(fixture["id"], fixture["tilt"], 90, f"Tilt to 90"))
+                    temp.append(self._setfixture(fixture["id"], fixture["pan"], 127, f"Pan to 127"))
                 temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
                 temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 140, f"Dimmer on 200"))
         idle_queue.enqueue(temp)
@@ -424,15 +448,22 @@ class ShowStructurer:
             result = {}
             result["name"] = "pause"
             group = self.universe["abovemoving"]
-            floodgroup = self.universe["flood"]
+            othergroups = []
+            if "abovewash" in self.universe:
+                othergroups.append(self.universe["abovewash"])
+            if "flood" in self.universe:
+                othergroups.append(self.universe["flood"])
+            if "strobe" in self.universe:
+                othergroups.append(self.universe["strobe"])
             beam_queue = Queue()
             beam_queue.enqueue(0)
             temp = []
             wait = 200
             time = length*1000 - wait
             speed = self.calculate_tilt_speed(group["1"], 74, time/1000)
-            for fixture in floodgroup.values():
-                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
+            for group in othergroups:
+                for fixture in group.values():
+                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
             beam_queue.enqueue(temp)
             beam_queue.enqueue(0)
             temp = []
@@ -473,8 +504,62 @@ class ShowStructurer:
         queue.enqueue(wait)
         result["queue"] = queue
         return result
+    
+    def randomstrobe(self, name, show, length=30000.0, start=0, queuename="strobe0", color="white"):
+        result = {}
+        strobe_queue = Queue()
+        result["name"] = queuename
+        strobe_queue.enqueue(start)
+        groups = []
+        if "abovewash" in self.universe:
+            group1 = self.universe["abovewash"]
+            groups.append(group1)
+        if "strobe" in self.universe:
+            group2 = self.universe["strobe"]
+            groups.append(group2)
+        time = length
+        fixtures = []
+        fixturedimmers = {}
+        indexes = [0, 0]
+        for group in groups:
+            fixtures.append(group.values())
+            for fixture in group.values():
+                fixturedimmers[fixture["id"]] = 255
+        while time > 1:
+            for set in fixtures:
+                print(set)
+                number = random.randint(0, len(set)-1)
+                while number == indexes[fixtures.index(set)]:
+                    number = random.randint(0, len(set)-1)
+                print(number)
+                temp = []
+                j = 0
+                for fixture in set:
+                    if j == number:
+                        colors = self.calculate_colors(fixture, color)
+                        temp += colors
+                        temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"Dimmer on"))
+                        temp.append(self._setfixture(fixture["id"], fixture["strobe"], fixture["nicestrobe"], f"Strobe on"))
+                        fixturedimmers[fixture["id"]] = 255
+                    elif fixturedimmers[fixture["id"]] > 0:
+                        temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
+                        fixturedimmers[fixture["id"]] = 0
+                    j += 1
+                indexes[fixtures.index(set)] = number
+                wait = 50
+                if time - wait < 0:
+                    wait = time
+                time -= wait
+                if time > 1:
+                    strobe_queue.enqueue(temp)
+                    strobe_queue.enqueue(wait)
+                else:
+                    result["queue"] = strobe_queue
+                    return result
 
-    def combine(self, queues, bpm):
+
+    def combine(self, queues, qxwhandler, showname, script_name):
+        segment = []
         command_queues = {}
         for queue in queues:
             command_queues[queue["name"]] = queue["queue"]
@@ -501,6 +586,7 @@ class ShowStructurer:
                             do_not_execute.append(key)
             queue = command_queues[q[0]]
             self._write(self._wait(q[1], f"Wait for {q[0]}"))
+            segment.append(self._wait(q[1], f"Wait for {q[0]}"))
             for name in times:
                 times[name] -= (q[1] + 3)
 
@@ -514,9 +600,11 @@ class ShowStructurer:
             if q[0] not in do_not_execute:
                 for command in commands:
                     self._write(command)
+                    segment.append(command)
             wait = queue.dequeue()
             if wait:
                 times[q[0]] = wait
+        qxwhandler.add_script(showname, segment, script_name)
 
     def generate_segment(self, name, show, length, intensity, pauses):
         queues = []
@@ -537,12 +625,12 @@ class ShowStructurer:
             queues.append(self.flood(name, length=length))
         self.combine(queues)
 
-    def generate_show(self, name):
+    def generate_show(self, name, file_path="Newsetup.qxw"):
+        qxw_handler = QXWHandler(file_path)
+        qxw_handler.create_copy(name)
         queues = []
         show = self.create_show(name)
-        # queues.append(self.reset_position())
-        # queues.append(self.swing(name, show, length=10000, start=200, queuename=f"swing1"))
-        # queues.append(self.pulse(name, show=show, length=10000, intervalmod=2, start=200, dimmer2=255, color1 = "green", color2="red", queuename=f"pulse1"))
+        # queues.append(self.randomstrobe(name, show, length=5000))
         sections = show.struct["chorus_sections"]
         segments = show.struct["segments"]
 
@@ -558,6 +646,7 @@ class ShowStructurer:
             i += 1
         
         for i in range(i, len(segments)):
+            queues = []
             found = False
             for section in sections:
 
@@ -573,9 +662,8 @@ class ShowStructurer:
                             queues.append(self.spin(name, show, length=length, start=segments[i]["start"]*1000, queuename=f"spin{i}"))
                         else:
                             queues.append(self.swing(name, show, length=length, start=segments[i]["start"]*1000, queuename=f"swing{i}"))
-                    queues.append(self.flood(name, length=length, start=segments[i]["start"]*1000, queuename=f"flood{i}"))
+                    queues.append(self.flood(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"flood{i}"))
 
-                    i += 1
                     break
 
             if found == False:
@@ -583,9 +671,9 @@ class ShowStructurer:
                 length = (segments[i]["end"] - segments[i]["start"])*1000
                 queues.append(self.idle(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"idle{i}"))
                 queues.append(self.pulse(name, show=show, length=length, start=segments[i]["start"]*1000, color1="green", color2="red", queuename=f"pulse{i}"))
-                
-                i += 1
-        self.combine(queues, show.bpm)
+            
+            self.combine(queues, qxw_handler, name, segments[i]["start"])
+            i += 1
                 
             
 
