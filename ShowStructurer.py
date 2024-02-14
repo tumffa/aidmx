@@ -149,20 +149,26 @@ class ShowStructurer:
         beatinterval = show.bpminterval
         time = length
         switch = 0
+        colors = ["red", "green", "blue", "pink", "yellow", "cyan", "orange", "purple"]
+        color1 = random.choice(colors)
+        colors = [color for color in colors if color != color1]
+        color2 = random.choice(colors)
         while time > 1:
             temp = []
             for fixture in group1.values():
                 if switch == 0:
                     if int(fixture["id"]) > 2:  # Every other fixture
-                        line = self._setfixture(fixture["id"], fixture["dimmer"], 255, f"{time}")
-                        temp.append(line)
+                        temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], "Open shutters"))
+                        temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"{time}"))
+                        temp += self.calculate_colors(fixture, color1)
                     else:
                         line = self._setfixture(fixture["id"], fixture["dimmer"], 0, f"{time}")
                         temp.append(line)
                 else:
                     if int(fixture["id"]) <= 2:
-                        line = self._setfixture(fixture["id"], fixture["dimmer"], 255, f"{time}")
-                        temp.append(line)
+                        temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], "Open shutters"))
+                        temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"{time}"))
+                        temp += self.calculate_colors(fixture, color2)
                     else:
                         line = self._setfixture(fixture["id"], fixture["dimmer"], 0, f"{time}")
                         temp.append(line)
@@ -328,9 +334,9 @@ class ShowStructurer:
             floodexists = True
             groups.append(group)
         else:
-            if "abovewash" in self.universe:
-                group1 = self.universe["abovewash"]
-                groups.append(group1)
+            # if "abovewash" in self.universe:
+            #     group1 = self.universe["abovewash"]
+            #     groups.append(group1)
             if "strobe" in self.universe:
                 group2 = self.universe["strobe"]
                 groups.append(group2)
@@ -379,11 +385,10 @@ class ShowStructurer:
             for fixture in group.values():
                 color_commands = self.calculate_colors(fixture, color1)
                 temp += color_commands
-                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer1, f"Dimmer reset"))
+                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer2, f"Dimmer reset"))
             color_commands = self.calculate_colors(group[str(i)], color2)
-            temp.append(self._setfixture(group[str(i)]["id"], group[str(i)]["dimmer"], dimmer2, "Dimmer off"))
+            temp.append(self._setfixture(group[str(i)]["id"], group[str(i)]["dimmer"], dimmer1, "Dimmer off"))
             temp += color_commands
-            pulse_queue.enqueue(temp)
             if time - switchinterval < 0:
                 switchinterval = time
             time -= switchinterval
@@ -391,10 +396,49 @@ class ShowStructurer:
             if i > len(group):
                 i = 1
             if time > 1:
+                pulse_queue.enqueue(temp)
                 pulse_queue.enqueue(switchinterval)
         result["queue"] = pulse_queue
         return result
     
+    def fastpulse(self, name, show, intervalmod=4, dimmer1=255, dimmer2=0, color1="all", color2=None, length=30000.0, start=0, queuename="fastpulse0"):
+        result = {}
+        fastpulse_queue = Queue()
+        result["name"] = queuename
+        fastpulse_queue.enqueue(start)
+        group = self.universe["abovewash"]
+        time = length
+        switchinterval = (show.bpminterval/len(group))*1000*4/intervalmod
+        i = 1
+        if color1 == "all":
+            colors = ["red", "green", "blue", "pink", "yellow", "cyan", "orange", "purple"]
+        else:
+            colors = [color1]
+        last_color = None
+        while time > 1:
+            temp = []
+            if i == 1:
+                color1 = random.choice(colors)
+                while color1 == last_color:
+                    color1 = random.choice(colors)
+                last_color = color1
+            for fixture in group.values():
+                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer2, f"Dimmer reset"))
+            color_commands = self.calculate_colors(group[str(i)], color1)
+            temp += color_commands
+            temp.append(self._setfixture(group[str(i)]["id"], group[str(i)]["dimmer"], dimmer1, "Dimmer off"))
+            if time - switchinterval < 0:
+                switchinterval = time
+            time -= switchinterval
+            i += 1
+            if i > len(group):
+                i = 1
+            if time > 1:
+                fastpulse_queue.enqueue(temp)
+                fastpulse_queue.enqueue(switchinterval)
+        result["queue"] = fastpulse_queue
+        return result
+
     def idle(self, name, show, length=30000.0, start=0, queuename="idle0"):
         result = {}
         idle_queue = Queue()
@@ -558,7 +602,7 @@ class ShowStructurer:
                     return result
 
 
-    def combine(self, queues, qxwhandler, showname, script_name):
+    def combine(self, queues):
         segment = []
         command_queues = {}
         for queue in queues:
@@ -588,7 +632,7 @@ class ShowStructurer:
             self._write(self._wait(q[1], f"Wait for {q[0]}"))
             segment.append(self._wait(q[1], f"Wait for {q[0]}"))
             for name in times:
-                times[name] -= (q[1] + 3)
+                times[name] -= (q[1] + 0)
 
                 if times[name] < 0:
                     times[name] = 0
@@ -604,42 +648,32 @@ class ShowStructurer:
             wait = queue.dequeue()
             if wait:
                 times[q[0]] = wait
-        qxwhandler.add_script(showname, segment, script_name)
-
-    def generate_segment(self, name, show, length, intensity, pauses):
-        queues = []
-        if intensity == 0:
-            for pause in pauses:
-                pausename = f"pause{str(pause[0])[:5]}"
-                print(pausename)
-                queues.append(self.pause((pause[1] - pause[0]), type="beams", start=pause[0]*1000, pausename=pausename))
-            queues.append(self.idle(name, show=show))
-            queues.append(self.pulse(name, show=show, length=length))
-        elif intensity == 1:
-            for pause in pauses:
-                pausename = f"pause{str(pause[0])[:5]}"
-                print(pausename)
-                queues.append(self.pause((pause[1] - pause[0]), type="blackout", start=pause[0]*1000, pausename=pausename))
-            queues.append(self.alternate(name, show=show, length=length))
-            queues.append(self.spin(name, length=length))
-            queues.append(self.flood(name, length=length))
-        self.combine(queues)
+        return segment
 
     def generate_show(self, name, file_path="Newsetup.qxw"):
         qxw_handler = QXWHandler(file_path)
         qxw_handler.create_copy(name)
+        scripts = []
+        function_names = []
         queues = []
         show = self.create_show(name)
         # queues.append(self.randomstrobe(name, show, length=5000))
         sections = show.struct["chorus_sections"]
         segments = show.struct["segments"]
 
+        queues.append(self.randomstrobe(name, show, length=5000))
+        strobescript = self.combine(queues)
+        qxw_handler.add_script(name, strobescript, "strobe")
+
+        queues = []
         pauses = show.struct["silent_ranges"]
         for pause in pauses:
             pause_start = pause[0] / 43
             pause_end = pause[1] / 43
             pausename = f"pause{str(pause[0])[:5]}"
             queues.append(self.pause((pause_end - pause_start), type="blackout", queuename=pausename, start=pause_start*1000))
+        scripts.append(self.combine(queues))
+        function_names.append("pauses")
 
         i = 0
         if segments[0]["label"] == "start":
@@ -655,25 +689,23 @@ class ShowStructurer:
                     print("found")
                     found = True
                     length = (segments[i]["end"] - segments[i]["start"])*1000
-
-                    queues.append(self.alternate(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternate{i}"))
-                    if "abovemoving" in self.universe:
-                        if segments[i]["label"] == show.struct["focus"]["first"]:
-                            queues.append(self.spin(name, show, length=length, start=segments[i]["start"]*1000, queuename=f"spin{i}"))
-                        else:
-                            queues.append(self.swing(name, show, length=length, start=segments[i]["start"]*1000, queuename=f"swing{i}"))
+                    if segments[i]["label"] == show.struct["focus"]["first"]:
+                        queues.append(self.fastpulse(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"fastpulse{i}"))
+                    else:
+                        queues.append(self.alternate(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternate{i}"))
                     queues.append(self.flood(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"flood{i}"))
-
                     break
 
             if found == False:
                 
                 length = (segments[i]["end"] - segments[i]["start"])*1000
                 queues.append(self.idle(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"idle{i}"))
-                queues.append(self.pulse(name, show=show, length=length, start=segments[i]["start"]*1000, color1="green", color2="red", queuename=f"pulse{i}"))
+                queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=segments[i]["start"]*1000, color1="green", color2="red", queuename=f"pulse{i}"))
             
-            self.combine(queues, qxw_handler, name, segments[i]["start"])
+            scripts.append(self.combine(queues))
+            function_names.append(str(segments[i]["start"]))
             i += 1
+        qxw_handler.add_track(scripts, name, function_names)
                 
             
 
@@ -712,5 +744,5 @@ class Show:
         self.song_data = song_data
         self.bpm = struct["bpm"]
         self.mp3_path = song_data["file"]
-        self.bpminterval = 60 / (struct["bpm"])
+        self.bpminterval = 60 / (struct["bpm"]*1.02)
         self.beatinterval = 60 / struct["bpm"]

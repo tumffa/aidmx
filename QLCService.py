@@ -25,6 +25,7 @@ class QXWHandler:
     def create_copy(self, showname):
         shutil.copy2(self.file, f"{showname}.qxw")
         self.shows[showname] = {"Functions": []}        
+
     def add_element(self, showname, parent_element_name, element_name, attributes={}, text=None, child_elements=[]):
         # Create the new element
         element = self.dom.createElement(element_name)
@@ -73,6 +74,35 @@ class QXWHandler:
         # Add the Function element to the XML file
         self.add_element(showname, 'Engine', 'Function', function_info, None, [speed, direction, run_order] + commands)
         self.shows[showname]["Functions"].append(function_info)
+
+        return str(len(self.shows[showname]["Functions"])-1)
+
+    def add_track(self, scripts, showname, function_names):
+        print(function_names)
+        # Assume add_script is a function that adds a script and returns its ID
+        script_ids = []
+        for i in range(len(scripts)):
+            script_ids.append(self.add_script(showname, scripts[i], function_names[i]))
+
+        attributes = {"ID": str(len(self.shows[showname]["Functions"])), "Type": "Collection", "Name": "New Collection 14"}
+        self.add_element(showname, "Engine", "Function", attributes)
+
+        # Get the newly created collection
+        engine = self.dom.getElementsByTagName("Engine")[0]
+        collection = engine.getElementsByTagName("Function")[-1]
+
+        # Add the script IDs as steps
+        for i, script_id in enumerate(script_ids):
+            attributes = {"Number": str(i)}
+            step = self.dom.createElement("Step")
+            for key, value in attributes.items():
+                step.setAttribute(key, value)
+            step.appendChild(self.dom.createTextNode(str(script_id)))
+            collection.appendChild(step)
+
+        # Write the XML declaration, DOCTYPE declaration, and XML string to the file
+        with open(f"{showname}.qxw", 'w') as f:
+            f.write(self.dom.toprettyxml(indent="  "))
 
 # Create a QXWHandler for the test file
 qxw_handler = QXWHandler('TEST.qxw')
