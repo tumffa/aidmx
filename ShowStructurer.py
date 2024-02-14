@@ -746,16 +746,19 @@ class ShowStructurer:
         qxw_handler.add_track(scripts, name, function_names)
 
     def add_chasers(self, name, show, handler):
+        handler.add_button(name, "BLACKOUT", "blackout", 1)
         queues = []
-        queues.append(self.randomstrobe(name, show, length=10000))
+        queues.append(self.randomstrobe(name, show, length=2000))
         strobescript = self.combine(queues)
-        strobeid = handler.add_script(name, strobescript, "strobe")
-        handler.add_chaser(name, strobeid, "FullWhiteStrobe")
+        strobeid = handler.add_script(name, strobescript, "FullStrobe")
+        chaserid = handler.add_chaser(name, strobeid, "FullWhiteStrobe", duration=1900)
+        handler.add_button(name, "FullWhiteStrobe", chaserid, 3)
         queues = []
-        queues.append(self.blind(name, show, length=10000))
+        queues.append(self.blind(name, show, length=2000))
         blindscript = self.combine(queues)
         blindid = handler.add_script(name, blindscript, "blind")
-        handler.add_chaser(name, blindid, "Blind")
+        chaserid = handler.add_chaser(name, blindid, "Blind", duration=1900)
+        handler.add_button(name, "BLIND", chaserid, 2)
             
 class Queue:
     def __init__(self):

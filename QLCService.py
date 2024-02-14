@@ -24,7 +24,7 @@ class QXWHandler:
 
     def create_copy(self, showname):
         shutil.copy2(self.file, f"{showname}.qxw")
-        self.shows[showname] = {"Functions": []}        
+        self.shows[showname] = {"Functions": [], "Buttons": []}        
 
     def add_element(self, showname, parent_element_name, element_name, attributes={}, text=None, child_elements=[]):
         # Create the new element
@@ -112,6 +112,8 @@ class QXWHandler:
         for key, value in attributes.items():
             chaser.setAttribute(key, value)
 
+        id = str(len(self.shows[showname]["Functions"]))
+
         # Create the Speed element
         speed = self.dom.createElement("Speed")
         speed.setAttribute("FadeIn", "0")
@@ -154,6 +156,71 @@ class QXWHandler:
         # Write the XML declaration, DOCTYPE declaration, and XML string to the file
         with open(f"{showname}.qxw", 'w') as f:
             f.write(self.dom.toprettyxml(indent="  "))
+        return id
+
+    def add_button(self, showname, caption, function_id, key, x=50, y=500):
+        # Get the Frame element
+        frame = self.dom.getElementsByTagName("Frame")[0]
+
+        # Create the Button element
+        attributes = {"Caption": caption, "ID": str(len(self.shows[showname]["Buttons"])), "Icon": ""}
+        button = self.dom.createElement("Button")
+        for i, value in attributes.items():
+            button.setAttribute(i, value)
+
+        # Create the WindowState element
+        window_state = self.dom.createElement("WindowState")
+        window_state.setAttribute("Visible", "True")
+        window_state.setAttribute("X", str(x))
+        window_state.setAttribute("Y", str(y))
+        window_state.setAttribute("Width", "50")
+        window_state.setAttribute("Height", "50")
+        button.appendChild(window_state)
+
+        # Create the Appearance element
+        appearance = self.dom.createElement("Appearance")
+        for attr in ["FrameStyle", "ForegroundColor", "BackgroundColor", "BackgroundImage", "Font"]:
+            child = self.dom.createElement(attr)
+            child.appendChild(self.dom.createTextNode("Default"))
+            appearance.appendChild(child)
+        button.appendChild(appearance)
+
+        actiontype = "Toggle"
+
+        if function_id == "blackout":
+            actiontype = "Blackout"
+            function_id = "4294967295"
+
+        # Create the Function element
+        function = self.dom.createElement("Function")
+        function.setAttribute("ID", str(function_id))
+        button.appendChild(function)
+
+        # Create the Action element
+        action = self.dom.createElement("Action")
+        action.appendChild(self.dom.createTextNode(actiontype))
+        button.appendChild(action)
+
+        # Create the Key element
+        key_element = self.dom.createElement("Key")
+        key_element.appendChild(self.dom.createTextNode(str(key)))
+        button.appendChild(key_element)
+
+        # Create the Intensity element
+        intensity = self.dom.createElement("Intensity")
+        intensity.setAttribute("Adjust", "False")
+        intensity.appendChild(self.dom.createTextNode("100"))
+        button.appendChild(intensity)
+
+        # Append the button to the Frame element
+        frame.appendChild(button)
+
+        self.shows[showname]["Buttons"].append(attributes)
+
+        # Write the XML declaration, DOCTYPE declaration, and XML string to the file
+        with open(f"{showname}.qxw", 'w') as f:
+            f.write(self.dom.toprettyxml(indent="  "))
+
 
 # Create a QXWHandler for the test file
 qxw_handler = QXWHandler('TEST.qxw')

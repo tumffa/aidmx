@@ -93,20 +93,6 @@
     <BackgroundImage>None</BackgroundImage>
     <Font>Default</Font>
    </Appearance>
-   <Button Caption="New Chaser 2" ID="0" Icon="">
-    <WindowState Visible="False" X="45" Y="500" Width="50" Height="50"/>
-    <Appearance>
-     <FrameStyle>None</FrameStyle>
-     <ForegroundColor>Default</ForegroundColor>
-     <BackgroundColor>Default</BackgroundColor>
-     <BackgroundImage>None</BackgroundImage>
-     <Font>Default</Font>
-    </Appearance>
-    <Function ID="4294967295"/>
-    <Action>Toggle</Action>
-    <Key>1</Key>
-    <Intensity Adjust="False">100</Intensity>
-   </Button>
   </Frame>
   <Properties>
    <Size Width="1920" Height="1080"/>
