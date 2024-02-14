@@ -600,7 +600,47 @@ class ShowStructurer:
                 else:
                     result["queue"] = strobe_queue
                     return result
-
+                
+    def blind(self, name, show, length=10000, start=0, queuename="blind0"):
+        result = {}
+        blind_queue = Queue()
+        result["name"] = queuename
+        blind_queue.enqueue(start)
+        groups = []
+        if "abovewash" in self.universe:
+            group1 = self.universe["abovewash"]
+            groups.append(group1)
+        if "strobe" in self.universe:
+            group2 = self.universe["strobe"]
+            groups.append(group2)
+        if "flood" in self.universe:
+            group3 = self.universe["flood"]
+            groups.append(group3)
+        if "blinders" in self.universe:
+            group4 = self.universe["blinders"]
+            groups.append(group4)
+        time = length
+        fixtures = []
+        for group in groups:
+            for fixture in group.values():
+                fixtures.append(fixture)
+        while time > 1:
+            temp = []
+            for fixture in fixtures:
+                colorcommands = self.calculate_colors(fixture, "white")
+                temp += colorcommands
+                temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
+                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"Dimmer on"))
+            wait = 50
+            if time - wait < 0:
+                wait = time
+            time -= wait
+            if time > 1:
+                blind_queue.enqueue(temp)
+                blind_queue.enqueue(wait)
+            else:
+                result["queue"] = blind_queue
+                return result
 
     def combine(self, queues):
         segment = []
@@ -661,11 +701,9 @@ class ShowStructurer:
         sections = show.struct["chorus_sections"]
         segments = show.struct["segments"]
 
-        queues.append(self.randomstrobe(name, show, length=5000))
-        strobescript = self.combine(queues)
-        qxw_handler.add_script(name, strobescript, "strobe")
+        #Add premade chasers
+        self. add_chasers(name, show, qxw_handler)
 
-        queues = []
         pauses = show.struct["silent_ranges"]
         for pause in pauses:
             pause_start = pause[0] / 43
@@ -706,9 +744,19 @@ class ShowStructurer:
             function_names.append(str(segments[i]["start"]))
             i += 1
         qxw_handler.add_track(scripts, name, function_names)
-                
-            
 
+    def add_chasers(self, name, show, handler):
+        queues = []
+        queues.append(self.randomstrobe(name, show, length=10000))
+        strobescript = self.combine(queues)
+        strobeid = handler.add_script(name, strobescript, "strobe")
+        handler.add_chaser(name, strobeid, "FullWhiteStrobe")
+        queues = []
+        queues.append(self.blind(name, show, length=10000))
+        blindscript = self.combine(queues)
+        blindid = handler.add_script(name, blindscript, "blind")
+        handler.add_chaser(name, blindid, "Blind")
+            
 class Queue:
     def __init__(self):
         self.queue = []

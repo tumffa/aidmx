@@ -100,6 +100,57 @@ class QXWHandler:
             step.appendChild(self.dom.createTextNode(str(script_id)))
             collection.appendChild(step)
 
+        self.shows[showname]["Functions"].append(attributes)
+        # Write the XML declaration, DOCTYPE declaration, and XML string to the file
+        with open(f"{showname}.qxw", 'w') as f:
+            f.write(self.dom.toprettyxml(indent="  "))
+
+    def add_chaser(self, showname, chaserid, chasername, duration=10000):
+        # Create the chaser element
+        attributes = {"ID": str(len(self.shows[showname]["Functions"])), "Type": "Chaser", "Name": chasername}
+        chaser = self.dom.createElement("Function")
+        for key, value in attributes.items():
+            chaser.setAttribute(key, value)
+
+        # Create the Speed element
+        speed = self.dom.createElement("Speed")
+        speed.setAttribute("FadeIn", "0")
+        speed.setAttribute("FadeOut", "0")
+        speed.setAttribute("Duration", str(duration))
+        chaser.appendChild(speed)
+
+        # Create the Direction element
+        direction = self.dom.createElement("Direction")
+        direction.appendChild(self.dom.createTextNode("Forward"))
+        chaser.appendChild(direction)
+
+        # Create the RunOrder element
+        run_order = self.dom.createElement("RunOrder")
+        run_order.appendChild(self.dom.createTextNode("Loop"))
+        chaser.appendChild(run_order)
+
+        # Create the SpeedModes element
+        speed_modes = self.dom.createElement("SpeedModes")
+        speed_modes.setAttribute("FadeIn", "Default")
+        speed_modes.setAttribute("FadeOut", "Default")
+        speed_modes.setAttribute("Duration", "Common")
+        chaser.appendChild(speed_modes)
+
+        # Create the Step element
+        step = self.dom.createElement("Step")
+        step.setAttribute("Number", "0")
+        step.setAttribute("FadeIn", "0")
+        step.setAttribute("Hold", "0")
+        step.setAttribute("FadeOut", "0")
+        step.appendChild(self.dom.createTextNode(str(chaserid)))
+        chaser.appendChild(step)
+
+        # Append the chaser to the Engine element
+        engine = self.dom.getElementsByTagName("Engine")[0]
+        engine.appendChild(chaser)
+
+        self.shows[showname]["Functions"].append(attributes)
+
         # Write the XML declaration, DOCTYPE declaration, and XML string to the file
         with open(f"{showname}.qxw", 'w') as f:
             f.write(self.dom.toprettyxml(indent="  "))
