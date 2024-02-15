@@ -61,6 +61,9 @@ class ShowStructurer:
     def _blackout(self, mode, comment=""):
         return f"blackout:{mode} //{comment}"
     
+    def _execute(self, command, comment=""):
+        return f"systemcommand:{command} //{comment}"
+    
     def _write(self, line):
         with open(self.file, "a") as f:
             f.write(line + "\n")
@@ -521,7 +524,7 @@ class ShowStructurer:
         else:
             color2 = random.choice(colorspectrum)
             color1 = color2
-        switchinterval = (show.bpminterval/(len(groups)+0.59))*1000*2/intervalmod
+        switchinterval = (show.bpminterval/(len(groups)+0.55))*1000*2/intervalmod
         switch = 0
         changed = []
         i = 0
@@ -835,6 +838,8 @@ class ShowStructurer:
         sections = show.struct["chorus_sections"]
         segments = show.struct["segments"]
 
+        scripts.append([self._execute(f"wsl play /home/tumffa/aidmx/songs/{name}.mp3")])
+        function_names.append("play_mp3")
         #Add premade chasers
         self.add_chasers(name, show, qxw)
 
@@ -850,7 +855,10 @@ class ShowStructurer:
         i = 0
         if segments[0]["label"] == "start":
             i += 1
-        
+        onefocus = False
+        if len(show.struct["focus"]) == 1:
+            onefocus = True
+        lastchaser = random.choice(["FastPulse", "SideToSide"])
         for i in range(i, len(segments)):
             queues = []
             found = False
@@ -864,8 +872,15 @@ class ShowStructurer:
                     types = ["alternate", "side_to_side"]
                     last_choice = None
                     if segments[i]["label"] == show.struct["focus"]["first"]:
-                        queues.append(self.fastpulse(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"fastpulse{i}"))
-                        queues.append(self.alternate_flood(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternateflood{i}"))
+                        if onefocus == False:
+                            queues.append(self.fastpulse(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"fastpulse{i}"))
+                            queues.append(self.alternate_flood(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternateflood{i}"))
+                        elif lastchaser == "FastPulse":
+                            queues.append(self.side_to_side(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"sidetoside{i}"))
+                            lastchaser = "SideToSide"
+                        elif lastchaser == "SideToSide":
+                            queues.append(self.fastpulse(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"fastpulse{i}"))
+                            lastchaser = "FastPulse"
                     else:
                         type = random.choice(types)
                         while type == last_choice:
