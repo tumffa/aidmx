@@ -1,12 +1,25 @@
 from xml.dom.minidom import parse, Document
 import shutil
+import os
 
 class QXWHandler:
     def __init__(self, file):
         self.file = file
-        self.dom = parse(file)
         self.shows = {}
+        self.filename = file.split(".qxw")[0]
 
+        if not os.path.exists("./shows"):
+            os.makedirs("./shows")
+        self.showfolder = os.path.abspath('./shows')
+
+        # Create the directory if it doesn't exist
+        directory = os.path.join('.', 'shows', self.filename)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        self.destination_folder = directory
+        print(self.destination_folder)
+        
     @staticmethod
     def remove_whitespace_nodes(node, unlink=False):
         """Removes all of the whitespace-only text descendants of node.
@@ -23,50 +36,57 @@ class QXWHandler:
                 node.unlink()
 
     def create_copy(self, showname):
-        shutil.copy2(self.file, f"{showname}.qxw")
-        self.shows[showname] = {"Functions": [], "Buttons": []}        
+        destination_folder = self.destination_folder
+        absolute_path = f"{destination_folder}/{showname}.qxw"
+        shutil.copy2(self.file, absolute_path)
+        self.shows[showname] = {"Functions": [], "Buttons": []}
+        self.shows[showname]["absolute_path"] = absolute_path
+        self.shows[showname]["dom"] = parse(absolute_path)
 
     def add_element(self, showname, parent_element_name, element_name, attributes={}, text=None, child_elements=[]):
         # Create the new element
-        element = self.dom.createElement(element_name)
+        dom = self.shows[showname]["dom"]
+        element = dom.createElement(element_name)
         for key, value in attributes.items():
             element.setAttribute(key, value)
         if text is not None:
-            element.appendChild(self.dom.createTextNode(text))
+            element.appendChild(dom.createTextNode(text))
 
         # Add child elements
         for child_element in child_elements:
             element.appendChild(child_element)
 
         # Find the parent element and append the new element to it
-        parent_element = self.dom.getElementsByTagName(parent_element_name)[0]
+        parent_element = dom.getElementsByTagName(parent_element_name)[0]
         parent_element.appendChild(element)
 
         # Remove whitespace nodes
-        QXWHandler.remove_whitespace_nodes(self.dom)
-
+        QXWHandler.remove_whitespace_nodes(dom)
+        showpath = self.shows[showname]["absolute_path"]
         # Write the XML declaration, DOCTYPE declaration, and XML string to the file
-        with open(f"{showname}.qxw", 'w') as f:
-            f.write(self.dom.toprettyxml(indent="  "))
+        with open(showpath, 'w') as f:
+            f.write(dom.toprettyxml(indent="  "))
 
     def add_script(self, showname, script, function_name):
         # Create the Speed, Direction, and RunOrder elements
-        speed = self.dom.createElement('Speed')
+        dom = self.shows[showname]["dom"]
+
+        speed = dom.createElement('Speed')
         speed.setAttribute('FadeIn', '0')
         speed.setAttribute('FadeOut', '0')
         speed.setAttribute('Duration', '0')
 
-        direction = self.dom.createElement('Direction')
-        direction.appendChild(self.dom.createTextNode('Forward'))
+        direction = dom.createElement('Direction')
+        direction.appendChild(dom.createTextNode('Forward'))
 
-        run_order = self.dom.createElement('RunOrder')
-        run_order.appendChild(self.dom.createTextNode('Loop'))
+        run_order = dom.createElement('RunOrder')
+        run_order.appendChild(dom.createTextNode('Loop'))
 
         # Create the Command elements
         commands = []
         for command in script:
-            command_elem = self.dom.createElement('Command')
-            command_elem.appendChild(self.dom.createTextNode(command))
+            command_elem = dom.createElement('Command')
+            command_elem.appendChild(dom.createTextNode(command))
             commands.append(command_elem)
 
         function_info = {'ID': str(len(self.shows[showname]["Functions"])), 'Type': 'Script', 'Name': str(function_name)}
@@ -78,7 +98,7 @@ class QXWHandler:
         return str(len(self.shows[showname]["Functions"])-1)
 
     def add_track(self, scripts, showname, function_names):
-        print(function_names)
+        dom = self.shows[showname]["dom"]
         # Assume add_script is a function that adds a script and returns its ID
         script_ids = []
         for i in range(len(scripts)):
@@ -88,88 +108,91 @@ class QXWHandler:
         self.add_element(showname, "Engine", "Function", attributes)
 
         # Get the newly created collection
-        engine = self.dom.getElementsByTagName("Engine")[0]
+        engine = dom.getElementsByTagName("Engine")[0]
         collection = engine.getElementsByTagName("Function")[-1]
 
         # Add the script IDs as steps
         for i, script_id in enumerate(script_ids):
             attributes = {"Number": str(i)}
-            step = self.dom.createElement("Step")
+            step = dom.createElement("Step")
             for key, value in attributes.items():
                 step.setAttribute(key, value)
-            step.appendChild(self.dom.createTextNode(str(script_id)))
+            step.appendChild(dom.createTextNode(str(script_id)))
             collection.appendChild(step)
 
         self.shows[showname]["Functions"].append(attributes)
+        showpath = self.shows[showname]["absolute_path"]
         # Write the XML declaration, DOCTYPE declaration, and XML string to the file
-        with open(f"{showname}.qxw", 'w') as f:
-            f.write(self.dom.toprettyxml(indent="  "))
+        with open(showpath, 'w') as f:
+            f.write(dom.toprettyxml(indent="  "))
 
     def add_chaser(self, showname, chaserid, chasername, duration=10000):
         # Create the chaser element
+        dom = self.shows[showname]["dom"]
         attributes = {"ID": str(len(self.shows[showname]["Functions"])), "Type": "Chaser", "Name": chasername}
-        chaser = self.dom.createElement("Function")
+        chaser = dom.createElement("Function")
         for key, value in attributes.items():
             chaser.setAttribute(key, value)
 
         id = str(len(self.shows[showname]["Functions"]))
 
         # Create the Speed element
-        speed = self.dom.createElement("Speed")
+        speed = dom.createElement("Speed")
         speed.setAttribute("FadeIn", "0")
         speed.setAttribute("FadeOut", "0")
         speed.setAttribute("Duration", str(duration))
         chaser.appendChild(speed)
 
         # Create the Direction element
-        direction = self.dom.createElement("Direction")
-        direction.appendChild(self.dom.createTextNode("Forward"))
+        direction = dom.createElement("Direction")
+        direction.appendChild(dom.createTextNode("Forward"))
         chaser.appendChild(direction)
 
         # Create the RunOrder element
-        run_order = self.dom.createElement("RunOrder")
-        run_order.appendChild(self.dom.createTextNode("Loop"))
+        run_order = dom.createElement("RunOrder")
+        run_order.appendChild(dom.createTextNode("Loop"))
         chaser.appendChild(run_order)
 
         # Create the SpeedModes element
-        speed_modes = self.dom.createElement("SpeedModes")
+        speed_modes = dom.createElement("SpeedModes")
         speed_modes.setAttribute("FadeIn", "Default")
         speed_modes.setAttribute("FadeOut", "Default")
         speed_modes.setAttribute("Duration", "Common")
         chaser.appendChild(speed_modes)
 
         # Create the Step element
-        step = self.dom.createElement("Step")
+        step = dom.createElement("Step")
         step.setAttribute("Number", "0")
         step.setAttribute("FadeIn", "0")
         step.setAttribute("Hold", "0")
         step.setAttribute("FadeOut", "0")
-        step.appendChild(self.dom.createTextNode(str(chaserid)))
+        step.appendChild(dom.createTextNode(str(chaserid)))
         chaser.appendChild(step)
 
         # Append the chaser to the Engine element
-        engine = self.dom.getElementsByTagName("Engine")[0]
+        engine = dom.getElementsByTagName("Engine")[0]
         engine.appendChild(chaser)
 
         self.shows[showname]["Functions"].append(attributes)
-
+        showpath = self.shows[showname]["absolute_path"]
         # Write the XML declaration, DOCTYPE declaration, and XML string to the file
-        with open(f"{showname}.qxw", 'w') as f:
-            f.write(self.dom.toprettyxml(indent="  "))
+        with open(showpath, 'w') as f:
+            f.write(dom.toprettyxml(indent="  "))
         return id
 
     def add_button(self, showname, caption, function_id, key, x=50, y=500):
+        dom = self.shows[showname]["dom"]
         # Get the Frame element
-        frame = self.dom.getElementsByTagName("Frame")[0]
+        frame = dom.getElementsByTagName("Frame")[0]
 
         # Create the Button element
         attributes = {"Caption": caption, "ID": str(len(self.shows[showname]["Buttons"])), "Icon": ""}
-        button = self.dom.createElement("Button")
+        button = dom.createElement("Button")
         for i, value in attributes.items():
             button.setAttribute(i, value)
 
         # Create the WindowState element
-        window_state = self.dom.createElement("WindowState")
+        window_state = dom.createElement("WindowState")
         window_state.setAttribute("Visible", "True")
         window_state.setAttribute("X", str(x))
         window_state.setAttribute("Y", str(y))
@@ -178,10 +201,10 @@ class QXWHandler:
         button.appendChild(window_state)
 
         # Create the Appearance element
-        appearance = self.dom.createElement("Appearance")
+        appearance = dom.createElement("Appearance")
         for attr in ["FrameStyle", "ForegroundColor", "BackgroundColor", "BackgroundImage", "Font"]:
-            child = self.dom.createElement(attr)
-            child.appendChild(self.dom.createTextNode("Default"))
+            child = dom.createElement(attr)
+            child.appendChild(dom.createTextNode("Default"))
             appearance.appendChild(child)
         button.appendChild(appearance)
 
@@ -192,47 +215,31 @@ class QXWHandler:
             function_id = "4294967295"
 
         # Create the Function element
-        function = self.dom.createElement("Function")
+        function = dom.createElement("Function")
         function.setAttribute("ID", str(function_id))
         button.appendChild(function)
 
         # Create the Action element
-        action = self.dom.createElement("Action")
-        action.appendChild(self.dom.createTextNode(actiontype))
+        action = dom.createElement("Action")
+        action.appendChild(dom.createTextNode(actiontype))
         button.appendChild(action)
 
         # Create the Key element
-        key_element = self.dom.createElement("Key")
-        key_element.appendChild(self.dom.createTextNode(str(key)))
+        key_element = dom.createElement("Key")
+        key_element.appendChild(dom.createTextNode(str(key)))
         button.appendChild(key_element)
 
         # Create the Intensity element
-        intensity = self.dom.createElement("Intensity")
+        intensity = dom.createElement("Intensity")
         intensity.setAttribute("Adjust", "False")
-        intensity.appendChild(self.dom.createTextNode("100"))
+        intensity.appendChild(dom.createTextNode("100"))
         button.appendChild(intensity)
 
         # Append the button to the Frame element
         frame.appendChild(button)
 
         self.shows[showname]["Buttons"].append(attributes)
-
+        showpath = self.shows[showname]["absolute_path"]
         # Write the XML declaration, DOCTYPE declaration, and XML string to the file
-        with open(f"{showname}.qxw", 'w') as f:
-            f.write(self.dom.toprettyxml(indent="  "))
-
-
-# Create a QXWHandler for the test file
-qxw_handler = QXWHandler('TEST.qxw')
-new_qxw_handler = qxw_handler.create_copy('NEW')
-
-# Define a script and function info
-script = ['wait%3A0%20%2F%2FWait%20for%20pause0', 'blackout%3Aon%20%2F%2FBlackout%20for%204.534883720930233%20seconds']
-function_name = "New script 0"
-
-# Add the script to the file
-qxw_handler.add_script("NEW", script, function_name)
-
-script = ['wait%3A0%20%2F%2FWait%20for%20pause0', 'blackout%3Aon%20%2F%2FBlackout%20for%204.534883720930233%20seconds']
-function_name = "New script 1"
-qxw_handler.add_script("NEW", script, function_name)
+        with open(showpath, 'w') as f:
+            f.write(dom.toprettyxml(indent="  "))
