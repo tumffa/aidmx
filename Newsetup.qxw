@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE Workspace>
-<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="FixtureManager">
+<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="InputOutputManager">
  <Creator>
   <Name>Q Light Controller Plus</Name>
   <Version>4.12.7</Version>
@@ -9,7 +9,7 @@
  <Engine>
   <InputOutputMap>
    <Universe Name="Universe 1" ID="0">
-    <Output Plugin="ArtNet" UID="2.100.100.1" Line="6"/>
+    <Output Plugin="DMX USB" UID="FT232R USB UART (S/N: B000T5UC)" Line="0"/>
    </Universe>
    <Universe Name="Universe 2" ID="1">
     <Output Plugin="ArtNet" UID="127.0.0.1" Line="0"/>

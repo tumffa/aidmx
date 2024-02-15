@@ -10,24 +10,24 @@ class ShowStructurer:
         self.shows = {}
         self.universe = {"abovewash": 
                          {"1": {"id": 1, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                                "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 110},
+                                "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
 
                                    "2": {"id": 2, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                                         "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 110},
+                                         "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
 
                                    "3": {"id": 3, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                                         "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 110},
+                                         "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
 
                                    "4": {"id": 4, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                                          "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 110}
+                                          "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250}
                                    },
 
                         "strobe": 
                         {"1": {"id": 0, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": (130, 249),
-                                "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 110},
+                                "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211},
 
                          "2": {"id": 5, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": (130, 249),
-                                "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 110}
+                                "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211}
                         }
         }         
         self.file = "showfile.txt"
@@ -370,6 +370,62 @@ class ShowStructurer:
         result["queue"] = flood_queue
         return result
     
+    def alternate_flood(self, name, show, length=30000.0, start=0, queuename="alternateflood0"):
+        result = {}
+        alternateflood_queue = Queue()
+        result["name"] = queuename
+        alternateflood_queue.enqueue(start)
+        struct, song_data = self.get_songdata(name)
+        self.shows[name] = show
+        if "flood" in self.universe:
+            group = self.universe["flood"]
+        elif "strobe" in self.universe:
+            group = self.universe["strobe"]
+        divider = len(group) // 2
+        time = length
+        beatinterval = show.bpminterval
+        wait = beatinterval * 1000
+        j = 0
+        which = 0
+        colors = ["red", "green", "blue", "pink", "yellow", "cyan", "orange", "purple"]
+        last_color = None
+        while time > 1:
+            if j == 4:
+                j = 0
+            if j == 0:
+                color1 = random.choice(colors)
+                while color1 == last_color:
+                    color1 = random.choice(colors)
+                last_color = color1
+            temp = []
+            for i in range(len(group)):
+                if int(list(group.keys())[i]) <= divider:
+                    if which == 0:
+                        colorcommands = self.calculate_colors(group[str(i+1)], color1)
+                        temp += colorcommands
+                        temp.append(self._setfixture(group[str(i+1)]["id"], group[str(i+1)]["shutter"], group[str(i+1)]["shutters"]["open"], f"Open shutters"))
+                        temp.append(self._setfixture(group[str(i+1)]["id"], group[str(i+1)]["dimmer"], 150, f"{time}"))
+                    else:
+                        temp.append(self._setfixture(group[str(i+1)]["id"], group[str(i+1)]["dimmer"], 0, f"{time}"))
+                else:
+                    if which == 1:
+                        colorcommands = self.calculate_colors(group[str(i+1)], color1)
+                        temp += colorcommands
+                        temp.append(self._setfixture(group[str(i+1)]["id"], group[str(i+1)]["shutter"], group[str(i+1)]["shutters"]["open"], f"Open shutters"))
+                        temp.append(self._setfixture(group[str(i+1)]["id"], group[str(i+1)]["dimmer"], 255, f"{time}"))
+                    else:
+                        temp.append(self._setfixture(group[str(i+1)]["id"], group[str(i+1)]["dimmer"], 0, f"{time}"))
+            which = 1 - which
+            j += 1
+            if time - wait < 0:
+                wait = time
+            time -= wait
+            if time > 1:
+                alternateflood_queue.enqueue(temp)
+                alternateflood_queue.enqueue(wait)
+        result["queue"] = alternateflood_queue
+        return result
+
     def pulse(self, name, show, intervalmod=1, dimmer1=255, dimmer2=100, color1="white", color2="white", length=30000.0, start=0, queuename="pulse0"):
         result = {}
         pulse_queue = Queue()
@@ -549,7 +605,7 @@ class ShowStructurer:
         result["queue"] = queue
         return result
     
-    def randomstrobe(self, name, show, length=30000.0, start=0, queuename="strobe0", color="white"):
+    def randomstrobe(self, name, show, length=30000.0, start=0, queuename="strobe0", strobecolor="white", waittime=10):
         result = {}
         strobe_queue = Queue()
         result["name"] = queuename
@@ -565,17 +621,24 @@ class ShowStructurer:
         fixtures = []
         fixturedimmers = {}
         indexes = [0, 0]
+        colorspectrum = ["red", "green", "blue", "pink", "yellow", "cyan", "orange", "purple"]
+        if strobecolor != "random":
+            color = strobecolor
+        last_color = None
         for group in groups:
             fixtures.append(group.values())
             for fixture in group.values():
                 fixturedimmers[fixture["id"]] = 255
         while time > 1:
             for set in fixtures:
-                print(set)
+                if strobecolor == "random":
+                    color = random.choice(colorspectrum)
+                    while color == last_color:
+                        color = random.choice(colorspectrum)
+                    last_color = color
                 number = random.randint(0, len(set)-1)
                 while number == indexes[fixtures.index(set)]:
                     number = random.randint(0, len(set)-1)
-                print(number)
                 temp = []
                 j = 0
                 for fixture in set:
@@ -597,9 +660,8 @@ class ShowStructurer:
                 if time > 1:
                     strobe_queue.enqueue(temp)
                     strobe_queue.enqueue(wait)
-                else:
-                    result["queue"] = strobe_queue
-                    return result
+        result["queue"] = strobe_queue
+        return result
                 
     def blind(self, name, show, length=10000, start=0, queuename="blind0"):
         result = {}
@@ -729,9 +791,9 @@ class ShowStructurer:
                     length = (segments[i]["end"] - segments[i]["start"])*1000
                     if segments[i]["label"] == show.struct["focus"]["first"]:
                         queues.append(self.fastpulse(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"fastpulse{i}"))
+                        queues.append(self.alternate_flood(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternateflood{i}"))
                     else:
                         queues.append(self.alternate(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternate{i}"))
-                    queues.append(self.flood(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"flood{i}"))
                     break
 
             if found == False:
@@ -747,18 +809,49 @@ class ShowStructurer:
 
     def add_chasers(self, name, show, handler):
         handler.add_button(name, "BLACKOUT", "blackout", 1)
+
         queues = []
         queues.append(self.randomstrobe(name, show, length=2000))
         strobescript = self.combine(queues)
         strobeid = handler.add_script(name, strobescript, "FullStrobe")
         chaserid = handler.add_chaser(name, strobeid, "FullWhiteStrobe", duration=1900)
         handler.add_button(name, "FullWhiteStrobe", chaserid, 3)
+
         queues = []
         queues.append(self.blind(name, show, length=2000))
         blindscript = self.combine(queues)
         blindid = handler.add_script(name, blindscript, "blind")
         chaserid = handler.add_chaser(name, blindid, "Blind", duration=1900)
         handler.add_button(name, "BLIND", chaserid, 2)
+
+        queues = []
+        queues.append(self.randomstrobe(name, show, length=2000, strobecolor="random"))
+        strobescript = self.combine(queues)
+        strobeid = handler.add_script(name, strobescript, "RandomStrobe")
+        chaserid = handler.add_chaser(name, strobeid, "RandomStrobe", duration=1900)
+        handler.add_button(name, "RandomStrobe", chaserid, "R")
+
+        queues = []
+        queues.append(self.randomstrobe(name, show, length=2000, strobecolor="red"))
+        strobescript = self.combine(queues)
+        strobeid = handler.add_script(name, strobescript, "RedStrobe")
+        chaserid = handler.add_chaser(name, strobeid, "RedStrobe", duration=1900)
+        handler.add_button(name, "RedStrobe", chaserid, "T")
+
+        queues = []
+        queues.append(self.randomstrobe(name, show, length=2000, strobecolor="green"))
+        strobescript = self.combine(queues)
+        strobeid = handler.add_script(name, strobescript, "GreenStrobe")
+        chaserid = handler.add_chaser(name, strobeid, "GreenStrobe", duration=1900)
+        handler.add_button(name, "GreenStrobe", chaserid, "Y")
+
+        queues = []
+        queues.append(self.randomstrobe(name, show, length=2000, strobecolor="blue"))
+        strobescript = self.combine(queues)
+        strobeid = handler.add_script(name, strobescript, "BlueStrobe")
+        chaserid = handler.add_chaser(name, strobeid, "BlueStrobe", duration=1900)
+        handler.add_button(name, "BlueStrobe", chaserid, "U")
+
             
 class Queue:
     def __init__(self):
