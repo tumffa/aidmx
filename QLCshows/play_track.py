@@ -15,7 +15,6 @@ def open_file(path):
     time.sleep(2)
     for image in images:
         while True:
-            time.sleep(0.2)
             # Try to locate the center of the image on the screen
             location = pyautogui.locateCenterOnScreen(image)
 
@@ -23,15 +22,12 @@ def open_file(path):
             if location is not None:
                 break
             # If the image is not found, wait for a second and try again
-
+            time.sleep(0.5)
         # Double click on 'collection.png', click once on the others
         if image == 'C:/ProgramData/QLCshows/gui/collection.png':
             pyautogui.doubleClick(location)
         else:
             pyautogui.click(location)
-
-# Now you can start using pyautogui
-pyautogui.click(100, 100)
 
 commands = sys.argv[1:]
 print(commands)
