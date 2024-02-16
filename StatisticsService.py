@@ -165,7 +165,7 @@ def update_struct(song_data, name=None, category=None, path=None, rms=False, par
         labels[segment['label']] = True
         segment_start = segment['start']
         segment_end = segment['end']
-
+        print(f"Segment start: {segment_start} Segment end: {segment_end} at {song_data['file']}")
         rms_slice = rms[int(segment_start*43):int(segment_end*43)]
         temp_avg = sum(rms_slice) / len(rms_slice)
         pauses = quiet_before_drop.get_pauses_for_segment(rms_slice, temp_avg*0.2)
@@ -208,7 +208,10 @@ def update_struct(song_data, name=None, category=None, path=None, rms=False, par
     drum_average = sum(drum_volumes) / len(drum_volumes)
 
     verses = [segment for segment in segments if segment['label'] == 'verse']
-    verses_avg = sum([segment['avg_combined'] for segment in verses]) / len(verses)
+    if len(verses) != 0:
+        verses_avg = sum([segment['avg_combined'] for segment in verses]) / len(verses)
+    else:
+        verses_avg = 0
     
     choruses = [segment for segment in segments if segment['label'] == 'chorus']
     if len(choruses) != 0:

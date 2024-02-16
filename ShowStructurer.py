@@ -429,7 +429,7 @@ class ShowStructurer:
         result["queue"] = alternateflood_queue
         return result
 
-    def pulse(self, name, show, intervalmod=1, dimmer1=255, dimmer2=100, color1="white", color2="white", length=30000.0, start=0, queuename="pulse0"):
+    def pulse(self, name, show, intervalmod=1, dimmer1=255, dimmer2=50, color1="white", color2="white", length=30000.0, start=0, queuename="pulse0"):
         result = {}
         pulse_queue = Queue()
         result["name"] = queuename
@@ -880,6 +880,7 @@ class ShowStructurer:
                             lastchaser = "SideToSide"
                         elif lastchaser == "SideToSide":
                             queues.append(self.fastpulse(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"fastpulse{i}"))
+                            queues.append(self.alternate_flood(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternateflood{i}"))
                             lastchaser = "FastPulse"
                     else:
                         type = random.choice(types)

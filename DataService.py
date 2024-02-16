@@ -7,79 +7,6 @@ from dataclasses import asdict
 from typing import Union, List
 import StatisticsService
 
-class DataManager:
-    def __init__(self):
-        self._songs = {}
-        if not os.path.exists("songdata.json"):
-            with open("songdata.json", "w") as f:
-                f.write("{}")
-        else:
-            self._get_json_data()
-
-        for file in os.listdir("./struct"):
-            if file.endswith(".json"):
-                name = file[:-5]
-                if name not in self._songs:
-                    self._songs[name] = {}
-                    self._songs[name]["analyzed"] = f"./struct/{name}.json"
-                    self._songs[name]["file"] = f"./songs/{name}.mp3"
-                    self._songs[name]["demixed"] = f"./demix/htdemucs/{name}/"
-
-    def _get_json_data(self):
-        with open("songdata.json", "r") as f:
-            data = json.load(f)
-            self._songs = data
-
-    def _save_json_data(self):
-        with open("songdata.json", "w") as f:
-            json.dump(self._songs, f)
-
-    def __str__(self):
-        return str(self._songs)
-    
-    def get_song(self, song_name):
-        return self._songs[song_name]
-    
-    def extract_data(self, audio_name, filepath):
-        print(audio_name)
-        if audio_name not in self._songs:
-            self._songs[audio_name] = {}
-            self._songs[audio_name]["file"] = filepath
-
-        # Run the demix function
-        path = f"./struct/{audio_name}.json"
-        try:
-            if self._songs[audio_name]["analyzed"] != path:
-                self._songs[audio_name]["analyzed"] = path
-        except KeyError:
-            self._songs[audio_name]["analyzed"] = path
-        try:
-            if not os.path.exists(path):
-                analyzed = allin1.analyze(Path(filepath))
-                helpers.save_results(analyzed, './struct', audio_name)
-            else:
-                print("Already analyzed")
-        except Exception as e:
-            print(f"Error while analyzing: {e}")
-        
-        path = f"./demix/htdemucs/{audio_name}/"
-        try:
-            if self._songs[audio_name]["demixed"] != path:
-                self._songs[audio_name]["demixed"] = path
-        except KeyError:
-            self._songs[audio_name]["demixed"] = path
-        try:
-            if not os.path.exists(f"./demix/htdemucs/{audio_name}"):
-                demix.demix([Path(filepath)], demix_dir=Path('./demix'), device='cuda:0')
-            else:
-                print("Already demixed")
-        except Exception as e:
-            print(f"Error while demixing: {e}")
-        data = get_struct_data(audio_name)
-        if "rms" not in data or "total_rms" not in data:
-            StatisticsService.initialize_rms(self._songs[audio_name], audio_name)
-
-        self._save_json_data()
 
 def update_struct_data(name, params, indent=2):
     # Load the existing data
@@ -121,3 +48,86 @@ def get_struct_data(name):
 def get_data(name):
     data = {}
     data["struct"] = get_struct_data(name)
+
+class DataManager:
+    def __init__(self):
+        self._songs = {}
+        if not os.path.exists("songdata.json"):
+            with open("songdata.json", "w") as f:
+                f.write("{}")
+        else:
+            self._get_json_data()
+
+        for file in os.listdir("./struct"):
+            if file.endswith(".json"):
+                name = file[:-5]
+                if name not in self._songs:
+                    self._songs[name] = {}
+                    self._songs[name]["analyzed"] = f"./struct/{name}.json"
+                    with open(f"./struct/{name}.json", "r") as f:
+                        data = json.load(f)
+                        if "path" in data:
+                            self._songs[name]["file"] = data["path"]
+                    self._songs[name]["demixed"] = f"./demix/htdemucs/{name}/"
+
+    def _get_json_data(self):
+        with open("songdata.json", "r") as f:
+            data = json.load(f)
+            self._songs = data
+
+    def _save_json_data(self):
+        with open("songdata.json", "w") as f:
+            json.dump(self._songs, f)
+
+    def __str__(self):
+        return str(self._songs)
+    
+    def get_song(self, song_name):
+        if song_name in self._songs:
+            return self._songs[song_name]
+        else:
+            return None
+    
+    def extract_data(self, audio_name, filepath):
+        print(audio_name)
+        if audio_name not in self._songs:
+            self._songs[audio_name] = {}
+            self._songs[audio_name]["file"] = filepath
+
+        # Run the demix function
+        path = f"./struct/{audio_name}.json"
+        try:
+            if self._songs[audio_name]["analyzed"] != path:
+                self._songs[audio_name]["analyzed"] = path
+        except KeyError:
+            self._songs[audio_name]["analyzed"] = path
+        try:
+            if not os.path.exists(path):
+                print("AAAAAAAAAAAAAAAA")
+                analyzed = allin1.analyze(Path(filepath))
+                helpers.save_results(analyzed, './struct', audio_name)
+            else:
+                print("Already analyzed")
+        except Exception as e:
+            print(f"Error while analyzing: {e}")
+        
+        path = f"./demix/htdemucs/{audio_name}/"
+        try:
+            if self._songs[audio_name]["demixed"] != path:
+                self._songs[audio_name]["demixed"] = path
+        except KeyError:
+            self._songs[audio_name]["demixed"] = path
+        try:
+            if not os.path.exists(f"./demix/htdemucs/{audio_name}"):
+                demix.demix([Path(filepath)], demix_dir=Path('./demix'), device='cuda:0')
+            else:
+                print("Already demixed")
+        except Exception as e:
+            print(f"Error while demixing: {e}")
+        data = get_struct_data(audio_name)
+        if "rms" not in data or "total_rms" not in data:
+            StatisticsService.initialize_rms(self._songs[audio_name], audio_name)
+
+        self._save_json_data()
+
+        update_struct_data(audio_name, [{"filepath": filepath}])

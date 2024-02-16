@@ -8,12 +8,13 @@ class QXWHandler:
         self.shows = {}
         self.filename = file.split(".qxw")[0]
 
-        if not os.path.exists("./shows"):
-            os.makedirs("./shows")
-        self.showfolder = os.path.abspath('./shows')
+        directory = '/mnt/c/ProgramData/QLCshows/shows'
+        # Check if the directory exists
+        if not os.path.exists(directory):
+            os.makedirs(directory)
 
         # Create the directory if it doesn't exist
-        directory = os.path.join('.', 'shows', self.filename)
+        directory = os.path.join(directory, self.filename)
         if not os.path.exists(directory):
             os.makedirs(directory)
 
@@ -34,6 +35,10 @@ class QXWHandler:
             node.parentNode.removeChild(node)
             if unlink:
                 node.unlink()
+
+    def get_path(self, showname):
+        path = self.shows[showname]["absolute_path"]
+        return path
 
     def create_copy(self, showname):
         destination_folder = self.destination_folder
