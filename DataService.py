@@ -126,7 +126,7 @@ class DataManager:
             print(f"Error while demixing: {e}")
         data = get_struct_data(audio_name)
         if "rms" not in data or "total_rms" not in data:
-            StatisticsService.initialize_rms(self._songs[audio_name], audio_name)
+            StatisticsService.initialize_rms(self._songs[audio_name], audio_name, data["segments"])
 
         self._save_json_data()
 
