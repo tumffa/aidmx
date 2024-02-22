@@ -681,7 +681,7 @@ class ShowStructurer:
         result["queue"] = queue
         return result
     
-    def randomstrobe(self, name, show, length=30000.0, start=0, queuename="strobe0", strobecolor="white", waittime=10):
+    def randomstrobe(self, name, show, length=30000.0, start=0, queuename="strobe0", strobecolor="white", waittime=50):
         result = {}
         strobe_queue = Queue()
         result["name"] = queuename
@@ -729,7 +729,7 @@ class ShowStructurer:
                         fixturedimmers[fixture["id"]] = 0
                     j += 1
                 indexes[fixtures.index(set)] = number
-                wait = 50
+                wait = waittime
                 if time - wait < 0:
                     wait = time
                 time -= wait
@@ -739,7 +739,7 @@ class ShowStructurer:
         result["queue"] = strobe_queue
         return result
                 
-    def blind(self, name, show, length=10000, start=0, queuename="blind0"):
+    def blind(self, name, show, length=10000, start=0, queuename="blind0", waittime = 50):
         result = {}
         blind_queue = Queue()
         result["name"] = queuename
@@ -769,7 +769,7 @@ class ShowStructurer:
                 temp += colorcommands
                 temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
                 temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"Dimmer on"))
-            wait = 50
+            wait = waittime
             if time - wait < 0:
                 wait = time
             time -= wait
@@ -832,17 +832,22 @@ class ShowStructurer:
         qxw.create_copy(name)
         scripts = []
         function_names = []
-        queues = []
         show = self.create_show(name)
         # queues.append(self.randomstrobe(name, show, length=5000))
         sections = show.struct["chorus_sections"]
         segments = show.struct["segments"]
-
-        scripts.append([self._execute(f"wsl play /home/tumffa/aidmx/songs/{name}.mp3")])
-        function_names.append("play_mp3")
+        
         #Add premade chasers
         self.add_chasers(name, show, qxw)
 
+        onset_parts = show.struct["onset_parts"]
+        for part in onset_parts:
+            queues = []
+            queues.append(self.randomstrobe(name, show, length=part[1]*1000-part[0]*1000, start=part[0]*1000, queuename=f"strobe{part[0]}", waittime=20))
+            scripts.append(self.combine(queues))
+            function_names.append(f"strobe{part[0]}")
+
+        queues = []
         pauses = show.struct["silent_ranges"]
         for pause in pauses:
             pause_start = pause[0] / 43
@@ -974,6 +979,9 @@ class ShowStructurer:
 class Queue:
     def __init__(self):
         self.queue = []
+
+    def get_queue(self):
+        return self.queue
 
     def is_empty(self):
         return len(self.queue) == 0

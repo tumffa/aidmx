@@ -1,15 +1,13 @@
 import librosa
 import numpy as np
-import json
 from pathlib import Path
-import pychorus
-import math
 import quiet_before_drop
 from pathlib import Path
 from typing import Union, List
 from dataclasses import asdict
 import numpy as np
 import DataService
+import librosatest
 
 def initialize_rms(song_data, name, segments):
     rms = [float(x) for x in get_rms(song_data)[0]]
@@ -28,6 +26,8 @@ def initialize_rms(song_data, name, segments):
     other_volume_sections =  divide_segments_by_volume(other_rms, segments, 172)
     vocals_volume_sections =  divide_segments_by_volume(vocals_rms, segments, 172)
 
+    onset_parts = librosatest.get_onset_parts(name)
+
     DataService.update_struct_data(name=name, params=[{"total_rms": total_rms, 'rms': rms,
                                                         'bass_rms': bass_rms, 'drums_rms': drums_rms,
                                                           'other_rms': other_rms, 'vocals_rms': vocals_rms,
@@ -36,7 +36,8 @@ def initialize_rms(song_data, name, segments):
                                                                 {"drum_volume_sections": drum_volume_sections},
                                                                   {"bass_volume_sections": bass_volume_sections},
                                                                     {"other_volume_sections": other_volume_sections},
-                                                                      {"vocals_volume_sections": vocals_volume_sections}])
+                                                                      {"vocals_volume_sections": vocals_volume_sections},
+                                                                        {"onset_parts": onset_parts}], indent=2)
 
 def get_rms(song_data=None, category=None, path=None)->tuple[list[float], float]:
     # Load the segment data from the JSON file
@@ -386,13 +387,19 @@ def segment(name, song_data, sectionby):
 
             if (segment["label"] in struct_data["loud_sections"] or segment["label"] in ["intro", "outro", "inst"]) and volume_difference >= -volume_threshold:
                 if i < len(segments) - 1:
-                    if segments[i+1]["label"] != "inst":
+                    if (segments[i+1]["label"] != "inst"):
                         temp["section"] = section
                         chorus_sections.append(temp)
                         added_sections.append(segment_start)
                         print(f"Segment start: {segment_start} added by in loud sections at {section}")
                         break
                     elif segments[i+1]["avg_combined"] < segment["avg_combined"]:
+                        temp["section"] = section
+                        chorus_sections.append(temp)
+                        added_sections.append(segment_start)
+                        print(f"Segment start: {segment_start} added by in loud sections at {section}")
+                        break
+                    elif segment["label"] == "inst":
                         temp["section"] = section
                         chorus_sections.append(temp)
                         added_sections.append(segment_start)
