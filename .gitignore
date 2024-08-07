@@ -2,7 +2,7 @@
 /data
 *.mp3
 *.wav
-*/__pycache__
+__pycache__
 /*.png
 /*.txt
 /paths/
