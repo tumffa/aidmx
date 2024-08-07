@@ -1,10 +1,9 @@
 *.qxw
-/demix
-/struct
+/data
 *.mp3
 *.wav
-__pycache__
+*/__pycache__
 /*.png
 /*.txt
 /paths/
-songdata.json
+showfile.txt
