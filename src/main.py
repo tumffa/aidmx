@@ -1,19 +1,26 @@
 import os
+import json
+from pathlib import Path
 from services.commandhandler import CommandHandler
 from services.queue_service import QueueManager
 from services.dataservice import DataManager
 from services.qlc_service import QLCHandler
 
 
+def load_config(config_path="config.json"):
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    return config
+
 def main():
     """Main function"""
 
-    current_path = os.path.dirname(os.path.abspath(__file__))
-    root_path = os.path.abspath(os.path.join(current_path, os.pardir))  # Navigate up one directory
-    setupfile = "Newsetup.qxw"
-    data_manager = DataManager(root_path)
-    qlc = QLCHandler(setupfile, root_path)
-    queueservice = QueueManager(setupfile, data_manager, qlc)
+    config = load_config()
+    setup_path = Path(config["setup_path"])
+    setupfile_name = setup_path.stem
+    data_manager = DataManager(config)
+    qlc = QLCHandler(setupfile_name, setup_path)
+    queueservice = QueueManager(setupfile_name, data_manager, qlc)
     handler = CommandHandler(queueservice)
     handler.start()
 

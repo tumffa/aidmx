@@ -1,5 +1,6 @@
 import librosa
 import numpy as np
+from pathlib import Path
 
 
 def detect_onsets(filename, threshold):
@@ -125,7 +126,7 @@ def convert_to_start_end_times(grouped_onsets):
     return start_end_times
 
 def get_onset_parts(name, dm):
-    onsets = detect_onsets(f"./data/demix/htdemucs/{name}/drums.wav", threshold=0.15)
+    onsets = detect_onsets(dm.demix_path / "htdemucs" / name / "drums.wav", threshold=0.15)
     merged_onsets = [merge_close_values(times, threshold=0.055) for times in onsets]
 
     segments = dm.get_struct_data(name)['segments']

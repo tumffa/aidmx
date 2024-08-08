@@ -1,6 +1,7 @@
 import librosa
 import numpy as np
-from services import onsets, dataservice
+from pathlib import Path
+from services import onsets
 
 def initialize_rms(song_data, name, segments, dm=None):
     rms = [float(x) for x in get_rms(song_data)[0]]
@@ -46,7 +47,7 @@ def get_rms(song_data=None, category=None, path=None)->tuple[list[float], float]
     if category:
         list = []
         for instru in category:
-            path = f"{data_path}{instru}.wav"
+            path = f"{data_path}/{instru}.wav"
             data_y, sr = librosa.load(path)
             list.append(librosa.feature.rms(y=data_y)[0])
         rms = [sum(x) for x in zip(*list)]

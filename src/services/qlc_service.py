@@ -3,11 +3,10 @@ import shutil
 import os
 
 class QLCHandler:
-    def __init__(self, file, root_path):
-        self.file = file
-        self.showfile_path = f"{root_path}/data/{file}"
+    def __init__(self, filename, setup_path):
+        self.showfile_path = setup_path
         self.shows = {}
-        self.filename = file.split(".qxw")[0]
+        self.filename = filename
 
         directory = '/mnt/c/ProgramData/QLCshows/shows'
         # Check if the shows-directory exists

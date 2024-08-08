@@ -1,9 +1,10 @@
 *.qxw
-/data
 *.mp3
 *.wav
 __pycache__
 /*.png
 /*.txt
-/paths/
 showfile.txt
+/struct
+/demix
+/data
