@@ -64,9 +64,20 @@ class DataManager:
                 print("Already demixed")
         except Exception as e:
             print(f"Error while demixing: {e}")
+
         data = self.get_struct_data(audio_name)
         if "rms" not in data or "total_rms" not in data:
-            audio_analyzer.initialize_rms(self.songs[audio_name], audio_name, data["segments"], dm=self)
+            segments = self.get_struct_data_by_key(audio_name, "segments")
+            params = audio_analyzer.initialize_rms(self.songs[audio_name], 
+                                                   audio_name, 
+                                                   self.demix_path, 
+                                                   segments)
+            self.update_struct_data(audio_name, params, indent=2)
+            struct_data = self.get_struct_data(audio_name)
+            params = audio_analyzer.struct_stats(self.songs[audio_name], 
+                                                       audio_name, 
+                                                       struct_data=struct_data)
+            self.update_struct_data(audio_name, params, indent=2)
 
         self._save_json_data()
 
@@ -106,6 +117,11 @@ class DataManager:
         with open(self.struct_path / f"{name}.json", 'r') as f:
             struct_data = json.load(f)
         return struct_data
+    
+    def get_struct_data_by_key(self, name, key):
+        with open(self.struct_path / f"{name}.json", 'r') as f:
+            struct_data = json.load(f)
+        return struct_data.get(key)
 
     def get_data(self, name):
         data = {}

@@ -20,7 +20,9 @@ class QueueManager:
         if not filepath:
             filepath = "data/songs/{}.mp3".format(audio_name)
         self.dm.extract_data(audio_name, os.path.abspath(filepath))
-        audio_analyzer.segment(audio_name, self.dm.get_song(audio_name), ["drums", "other"], dm=self.dm)
+        struct_data = self.dm.get_struct_data(audio_name)
+        params = audio_analyzer.segment(audio_name, struct_data)
+        self.dm.update_struct_data(audio_name, params, indent=2)
         self.structurer.generate_show(audio_name, self.qlc)
 
     def analyze_queue(self, queue_folder):

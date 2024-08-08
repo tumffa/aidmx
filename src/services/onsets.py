@@ -125,11 +125,10 @@ def convert_to_start_end_times(grouped_onsets):
             start_end_times.append((start, end))
     return start_end_times
 
-def get_onset_parts(name, dm):
-    onsets = detect_onsets(dm.demix_path / "htdemucs" / name / "drums.wav", threshold=0.15)
+def get_onset_parts(name, segments, demix_path: Path):
+    onsets = detect_onsets(demix_path / "htdemucs" / name / "drums.wav", threshold=0.15)
     merged_onsets = [merge_close_values(times, threshold=0.055) for times in onsets]
 
-    segments = dm.get_struct_data(name)['segments']
     segment_rates = onset_rate_per_segment(merged_onsets, segments)
     for i, segment in enumerate(segments):
         print(f'Segment {i}: {segment_rates[i]} onsets per second')
