@@ -265,9 +265,7 @@ def segment(name, struct_data):
                     continue
                 if segments[i + k]["avg_combined"] - struct_data["loud_sections_average"] <= -volume_threshold*1.3 and segments[i + k]["avg_volume"] - struct_data["loud_sections_average2"] <= -volume_threshold2*1.3:
                     add = True
-                    break
-                else:
-                    continue
+                break
             if add:
                 for index in indexes:
                     temp = {"seg_start": segments[index]["start"], "seg_end": segments[index]["end"], "label": segments[index]["label"], "avg_volume": segments[index]["avg_volume"], "avg_combined": segments[index]["avg_combined"]}

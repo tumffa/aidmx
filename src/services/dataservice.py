@@ -26,6 +26,15 @@ class DataManager:
     def __str__(self):
         return str(self.songs)
     
+    def return_path(self, name):
+        # Return absolute data, struct, or demix path
+        paths = {
+            "data": self.data_path.resolve(),
+            "struct": self.struct_path.resolve(),
+            "demix": self.demix_path.resolve()
+        }
+        return paths.get(name)
+    
     def get_song(self, song_name):
         return self.songs.get(song_name, None)
     
@@ -79,6 +88,22 @@ class DataManager:
                                                        struct_data=struct_data)
             self.update_struct_data(audio_name, params, indent=2)
 
+        self._save_json_data()
+
+    def sync_with_struct(self):
+        for file in self.struct_path.resolve().iterdir():
+            if file.suffix == '.json':
+                song_name = file.stem
+                if song_name not in self.songs:
+                    self.update_songdata(song_name)
+    
+    def update_songdata(self, song_name):
+        content = {
+            "file": f"{self.data_path.resolve()}/songs/{song_name}.mp3",
+            "analyzed": f"{self.struct_path.resolve()}/{song_name}.json",
+            "demixed": f"{self.demix_path.resolve()}/htdemucs/{song_name}"
+            }
+        self.songs[song_name] = content
         self._save_json_data()
 
     def update_struct_data(self, name, params, indent=2):

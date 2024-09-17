@@ -1,6 +1,6 @@
 {
-    "data_path": "./data",
-    "struct_path": "./struct",
-    "demix_path": "./demix",
-    "setup_path": "./data/Newsetup.qxw"
+    "data_path": "../data",
+    "struct_path": "../struct",
+    "demix_path": "../demix",
+    "setup_path": "../data/Newsetup.qxw"
 }
