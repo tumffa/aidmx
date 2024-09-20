@@ -61,13 +61,15 @@ class DataManager:
             print(f"Error while analyzing: {e}")
         
         path = self.demix_path / "htdemucs" / audio_name
+        # true if drums, vocals, bass, other.wav in audio_name
+        demix_exists = all(path.exists() for path in [path / f"{inst}.wav" for inst in ["drums", "vocals", "bass", "other"]])
         try:
             if self.songs[audio_name].get("demixed") != str(path):
                 self.songs[audio_name]["demixed"] = str(path)
         except KeyError:
             self.songs[audio_name]["demixed"] = str(path)
         try:
-            if not path.exists():
+            if not demix_exists:
                 demix.demix([Path(filepath)], demix_dir=self.demix_path, device='cuda:0')
             else:
                 print("Already demixed")

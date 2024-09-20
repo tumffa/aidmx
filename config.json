@@ -2,5 +2,6 @@
     "data_path": "../data",
     "struct_path": "../struct",
     "demix_path": "../demix",
-    "setup_path": "../data/Newsetup.qxw"
+    "setup_path": "../data/Newsetup.qxw",
+    "device": "cuda:0"
 }

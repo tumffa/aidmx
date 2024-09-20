@@ -36,7 +36,7 @@ class QueueManager:
         for file in os.listdir(queue_folder):
             if file.endswith(".mp3"):
                 audio_name = file[:-4]
-                self.analyze_track(audio_name, f"{queue_folder}/{file}")
+                self.analyze_file(audio_name, f"{queue_folder}/{file}")
                 self.queue.append(audio_name)
 
     def play_track(self, audio_name):
@@ -51,7 +51,7 @@ class QueueManager:
             audio_name = file
             print(f"AUTOANALYSIS: Analyzing track {audio_name}")
             self.analysed.append(audio_name)
-            self.analyze_track(audio_name, f"{folder}/{file}.mp3")
+            self.analyze_file(audio_name, f"{folder}/{file}.mp3")
 
     def auto_play_track(self, audio_name):
         data = self.dm.get_song(audio_name)
@@ -93,13 +93,7 @@ class QueueManager:
 
         self.queue = ready_songs + not_ready_songs
 
-        self.analyze_track(self.queue[0], f"{folder_path}/{self.queue[0]}.mp3")
-
-        threading.Thread(target=self.play_songs).start()
-
-        # Analyze any songs that aren't ready
-        self.concurrent_analyze(folder_path, self.queue[1:])
-        print("Analyzed all songs")
+        self.concurrent_analyze(folder_path, not_ready_songs)
 
     def play_songs(self):
         ready = True
