@@ -17,8 +17,8 @@ Install all-in-one models from https://github.com/mir-aidj/all-in-one?tab=readme
 - **Integration with Existing QLC+ Setup**: Builds a new QLC file based on an existing lighting setup.
 
 ## Showcase
-[![Showcase Video](https://img.youtube.com/vi/g-IZg1kFES4/0.jpg)](https://www.youtube.com/watch?v=g-IZg1kFES4&t=177s)
+[![Showcase Video](https://img.youtube.com/vi/g-IZg1kFES4/0.jpg)](https://youtu.be/g-IZg1kFES4?si=bYKBismXbn0RaHIn)
 
-Add me on discord if you have questions, username: ```_tume_```
+DM on discord if you have questions @ ```_tume_```
 
 Code is still in an experimental stage, so I got some refactoring to do.
