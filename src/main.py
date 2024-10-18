@@ -7,7 +7,7 @@ from services.dataservice import DataManager
 from services.qlc_service import QLCHandler
 
 
-def load_config(config_path="../config.json"):
+def load_config(config_path="config.json"):
     with open(config_path, 'r') as f:
         config = json.load(f)
     return config

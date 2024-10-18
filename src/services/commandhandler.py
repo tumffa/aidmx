@@ -23,12 +23,10 @@ class CommandHandler:
     def handle_command(self, command):
         command = command.split()
         if command[0] == "analyze":
+            strobe = True
             if len(command) == 3:
-                self.queuemanager.analyze_file(command[1], command[2])
-            elif len(command) == 2:
-                self.queuemanager.analyze_file(command[1], None)
-            else:
-                print("Invalid number of arguments")
+                strobe = False
+            self.queuemanager.analyze_file(command[1], None, strobe)
         elif command[0] == "af":
             if len(command) == 2:
                 self.queuemanager.choose_folder(command[1])

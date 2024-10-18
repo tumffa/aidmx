@@ -15,19 +15,19 @@ class QueueManager:
         self.qlc = qlc
         self.structurer = ShowStructurer(data_manager)
 
-    def analyze_file(self, audio_name, filepath):
+    def analyze_file(self, audio_name, filepath, strobes=True):
         print(f"Analyzing track {audio_name}")
         if not filepath:
             filepath = "{}/songs/{}.mp3".format(self.dm.return_path("data"), audio_name)
             print(f"Using default path: {filepath}")
         self.dm.extract_data(audio_name, os.path.abspath(filepath))
-        self.analyze_data(audio_name)
+        self.analyze_data(audio_name, strobes)
 
-    def analyze_data(self, audio_name):
+    def analyze_data(self, audio_name, strobes=True):
         struct_data = self.dm.get_struct_data(audio_name)
         params = audio_analyzer.segment(audio_name, struct_data)
         self.dm.update_struct_data(audio_name, params, indent=2)
-        self.structurer.generate_show(audio_name, self.qlc)
+        self.structurer.generate_show(audio_name, self.qlc, strobes)
     
     def sync_with_struct(self):
         self.dm.sync_with_struct()

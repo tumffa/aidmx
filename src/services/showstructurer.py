@@ -5,32 +5,24 @@ class ShowStructurer:
     def __init__(self, data_manager):
         self.dm = data_manager
         self.shows = {}
-        self.universe = {"abovewash": 
-                         {"1": {"id": 1, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                                "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+        self.universe = {}
+        # self.universe["abovewash"] = {
+        #     "1": {"id": 1, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
+        #             "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+        #     "2": {"id": 2, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
+        #             "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+        #     "3": {"id": 3, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
+        #             "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+        #     "4": {"id": 4, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
+        #             "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250}
+        # }
 
-                                   "2": {"id": 2, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                                         "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
-
-                                   "3": {"id": 3, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                                         "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
-
-                                   "4": {"id": 4, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                                          "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250}
-                                   },
-
-                        "strobe": 
-                        {"1": {"id": 0, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": (130, 249),
-                                "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211},
-
-                         "2": {"id": 5, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": (130, 249),
-                                "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211}
-                        }
-        }         
-        self.file = "showfile.txt"
-        #empty the showfile
-        with open(self.file, "w") as f:
-            f.write("")
+        self.universe["strobe"] = {
+            "1": {"id": 0, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": (130, 249),
+                  "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211},
+            "2": {"id": 5, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": (130, 249),
+                  "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211}
+        }
 
     def get_songdata(self, name):
         struct = self.dm.get_struct_data(name)
@@ -60,10 +52,6 @@ class ShowStructurer:
     
     def _execute(self, command, comment=""):
         return f"systemcommand:{command} //{comment}"
-    
-    def _write(self, line):
-        with open(self.file, "a") as f:
-            f.write(line + "\n")
 
     def calculate_pan_speed(self, fixture, angle, time):
         range = fixture["panrange"]
@@ -101,63 +89,84 @@ class ShowStructurer:
             color_1 = fixture["colors"][color]
             temp.append(self._setfixture(fixture["id"], fixture["color"], color_1, f"Dimmer on"))
         elif fixture["colortype"] == "seperate":
-            if color == "white":
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], 255, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], 255, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], 255, f"Dimmer on"))
-            elif color == "red":
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], 255, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], 0, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], 0, f"Dimmer on"))
-            elif color == "green":
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], 0, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], 255, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], 0, f"Dimmer on"))
-            elif color == "blue":
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], 0, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], 0, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], 255, f"Dimmer on"))
-            elif color == "pink":
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], 255, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], 0, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], 255, f"Dimmer on"))
-            elif color == "yellow":
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], 255, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], 255, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], 0, f"Dimmer on"))
-            elif color == "cyan":
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], 0, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], 255, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], 255, f"Dimmer on"))
-            elif color == "orange":
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], 255, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], 100, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], 0, f"Dimmer on"))
-            elif color == "purple":
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], 100, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], 0, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], 255, f"Dimmer on"))
+            color_map = {
+                "white": {"red": 255, "green": 255, "blue": 255},
+                "red": {"red": 255, "green": 0, "blue": 0},
+                "green": {"red": 0, "green": 255, "blue": 0},
+                "blue": {"red": 0, "green": 0, "blue": 255},
+                "pink": {"red": 255, "green": 0, "blue": 255},
+                "yellow": {"red": 255, "green": 255, "blue": 0},
+                "cyan": {"red": 0, "green": 255, "blue": 255},
+                "orange": {"red": 255, "green": 100, "blue": 0},
+                "purple": {"red": 100, "green": 0, "blue": 255}
+            }
+
+            if color in color_map:
+                channels = color_map[color]
+                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], channels["red"], f"Dimmer on"))
+                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], channels["green"], f"Dimmer on"))
+                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], channels["blue"], f"Dimmer on"))
         return temp
     
+    def slow_flash(self, name, show, length=30000.0, start=0, queuename="slowflash0"):
+        # an effect that every 4 beats flashes a new colour that fades off
+        result = {}
+        slowflash_queue = Queue()
+        result["name"] = queuename
+        slowflash_queue.enqueue(start)
+        beatinterval = show.beatinterval
+        time = length
+        group = {}
+        # make a group with all fixtures
+        if "abovewash" in self.universe:
+            group.update(self.universe["abovewash"])
+        if "strobe" in self.universe:
+            group.update(self.universe["strobe"])
+        colors = ["red", "green", "blue", "pink", "yellow", "cyan", "orange", "purple"]
+        iterations = 0
+        color = random.choice(colors)
+        wait = (16 * beatinterval * 1000) / 50
+        while time > 1:
+            if iterations == 50:
+                iterations = 0
+                color = random.choice(colors)
+            temp = []
+            for fixture in group.values():
+                temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], "Open shutters"))
+                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255*(iterations/50), f"{time}"))
+                temp += self.calculate_colors(fixture, color)
+            iterations += 1
+            slowflash_queue.enqueue(temp)
+            if time - wait < 0:
+                wait = time
+            time -= wait
+            if time > 1:
+                slowflash_queue.enqueue(wait)
+        result["queue"] = slowflash_queue
+        return result
 
     def alternate(self, name, show, length=30000.0, start=0, queuename="alternate0"):
         result = {}
         light_queue = Queue()
         result["name"] = queuename
         light_queue.enqueue(start)
-        group1 = self.universe["abovewash"]
-        beatinterval = show.bpminterval
+        if "abovewash" in self.universe:
+            group1 = self.universe["abovewash"]
+        else:
+            group1 = self.universe["strobe"]
+        beatinterval = show.beatinterval
         time = length
         switch = 0
         colors = ["red", "green", "blue", "pink", "yellow", "cyan", "orange", "purple"]
         color1 = random.choice(colors)
         colors = [color for color in colors if color != color1]
         color2 = random.choice(colors)
+        fixtures_amount = len(group1)
         while time > 1:
             temp = []
             for fixture in group1.values():
                 if switch == 0:
-                    if int(fixture["id"]) > 2:  # Every other fixture
+                    if int(fixture["id"]) > fixtures_amount/2:
                         temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], "Open shutters"))
                         temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"{time}"))
                         temp += self.calculate_colors(fixture, color1)
@@ -165,7 +174,7 @@ class ShowStructurer:
                         line = self._setfixture(fixture["id"], fixture["dimmer"], 0, f"{time}")
                         temp.append(line)
                 else:
-                    if int(fixture["id"]) <= 2:
+                    if int(fixture["id"]) <= fixtures_amount/2:
                         temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], "Open shutters"))
                         temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"{time}"))
                         temp += self.calculate_colors(fixture, color2)
@@ -268,7 +277,7 @@ class ShowStructurer:
         swing_queue.enqueue(start)
         group = self.universe["abovemoving"]
         time = length
-        beatinterval = show.bpminterval
+        beatinterval = show.beatinterval
         print(f"beat{beatinterval}")
         angle = 70
         swingtime = beatinterval
@@ -344,7 +353,7 @@ class ShowStructurer:
         if interval:
             beatinterval = interval
         else:
-            beatinterval = show.bpminterval
+            beatinterval = show.beatinterval
         print(beatinterval)
         lightvalue = 0
         wait = beatinterval * 1000  # Adjust wait to be equal to the beat interval in milliseconds
@@ -383,7 +392,7 @@ class ShowStructurer:
             group = self.universe["strobe"]
         divider = len(group) // 2
         time = length
-        beatinterval = show.bpminterval
+        beatinterval = show.beatinterval
         wait = beatinterval * 1000
         j = 0
         which = 0
@@ -434,7 +443,7 @@ class ShowStructurer:
         self.shows[name] = show
         group = self.universe["abovewash"]
         time = length
-        switchinterval = (show.bpminterval/len(group))*1000*4/intervalmod
+        switchinterval = (show.beatinterval/len(group))*1000*4/intervalmod
         i = 1
         while time > 1:
             temp = []
@@ -462,9 +471,12 @@ class ShowStructurer:
         fastpulse_queue = Queue()
         result["name"] = queuename
         fastpulse_queue.enqueue(start)
-        group = self.universe["abovewash"]
+        if "abovewash" in self.universe:
+            group = self.universe["abovewash"]
+        elif "strobe" in self.universe:
+            group = self.universe["strobe"]
         time = length
-        switchinterval = (show.bpminterval/len(group))*1000*4/intervalmod
+        switchinterval = (show.beatinterval/len(group))*1000*4/intervalmod
         i = 1
         if color1 == "all":
             colors = ["red", "green", "blue", "pink", "yellow", "cyan", "orange", "purple"]
@@ -521,7 +533,7 @@ class ShowStructurer:
         else:
             color2 = random.choice(colorspectrum)
             color1 = color2
-        switchinterval = (show.bpminterval/(len(groups)+0.55))*1000*2/intervalmod
+        switchinterval = (show.beatinterval/(len(groups)+0.55))*1000*2/intervalmod
         switch = 0
         changed = []
         i = 0
@@ -804,7 +816,6 @@ class ShowStructurer:
                         if key_index < index:
                             do_not_execute.append(key)
             queue = command_queues[q[0]]
-            self._write(self._wait(q[1], f"Wait for {q[0]}"))
             segment.append(self._wait(q[1], f"Wait for {q[0]}"))
             for name in times:
                 times[name] -= (q[1] + 0)
@@ -818,14 +829,13 @@ class ShowStructurer:
                 continue
             if q[0] not in do_not_execute:
                 for command in commands:
-                    self._write(command)
                     segment.append(command)
             wait = queue.dequeue()
             if wait:
                 times[q[0]] = wait
         return segment
 
-    def generate_show(self, name, qxw):
+    def generate_show(self, name, qxw, strobes=True):
         qxw.create_copy(name)
         scripts = []
         function_names = []
@@ -837,12 +847,13 @@ class ShowStructurer:
         #Add premade chasers
         self.add_chasers(name, show, qxw)
 
-        onset_parts = show.struct["onset_parts"]
-        for part in onset_parts:
-            queues = []
-            queues.append(self.randomstrobe(name, show, length=part[1]*1000-part[0]*1000, start=part[0]*1000, queuename=f"strobe{part[0]}", waittime=20))
-            scripts.append(self.combine(queues))
-            function_names.append(f"strobe{part[0]}")
+        if strobes:
+            onset_parts = show.struct["onset_parts"]
+            for part in onset_parts:
+                queues = []
+                queues.append(self.randomstrobe(name, show, length=part[1]*1000-part[0]*1000, start=part[0]*1000, queuename=f"strobe{part[0]}", waittime=20))
+                scripts.append(self.combine(queues))
+                function_names.append(f"strobe{part[0]}")
 
         queues = []
         pauses = show.struct["silent_ranges"]
@@ -876,19 +887,21 @@ class ShowStructurer:
                     if segments[i]["label"] == show.struct["focus"]["first"]:
                         if onefocus == False:
                             queues.append(self.fastpulse(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"fastpulse{i}"))
-                            queues.append(self.alternate_flood(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternateflood{i}"))
-                        elif lastchaser == "FastPulse":
+                        elif lastchaser == "FastPulse" and "abovewash" in self.universe:
                             queues.append(self.side_to_side(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"sidetoside{i}"))
                             lastchaser = "SideToSide"
-                        elif lastchaser == "SideToSide":
+                        elif lastchaser == "SideToSide" or "abovewash" not in self.universe:
                             queues.append(self.fastpulse(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"fastpulse{i}"))
-                            queues.append(self.alternate_flood(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternateflood{i}"))
+                            if "abovewash" in self.universe:
+                                queues.append(self.alternate_flood(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternateflood{i}"))
                             lastchaser = "FastPulse"
                     else:
                         type = random.choice(types)
                         while type == last_choice:
                             type = random.choice(types)
                         last_choice = type
+                        if "abovewash" not in self.universe:
+                            type = "alternate"
                         if type == "alternate":
                             queues.append(self.alternate(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternateflood{i}"))
                         else:
@@ -899,8 +912,11 @@ class ShowStructurer:
                 
                 length = (segments[i]["end"] - segments[i]["start"])*1000
                 queues.append(self.idle(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"idle{i}"))
-                queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=segments[i]["start"]*1000, color1="green", color2="red", queuename=f"pulse{i}"))
-            
+                if "abovewash" in self.universe:
+                    queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=segments[i]["start"]*1000, color1="green", color2="red", queuename=f"pulse{i}"))
+                else:
+                    queues.append(self.slow_flash(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"slowflash{i}"))
+
             scripts.append(self.combine(queues))
             function_names.append(str(segments[i]["start"]))
             i += 1
@@ -972,6 +988,13 @@ class ShowStructurer:
         chaserid = handler.add_chaser(name, sidetosideid, "SideToSide", duration=7900)
         handler.add_button(name, "SideToSide", chaserid, "X")
 
+        queues = []
+        queues.append(self.slow_flash(name, show, length=8000))
+        slowflashscript = self.combine(queues)
+        slowflashid = handler.add_script(name, slowflashscript, "SlowFlash")
+        chaserid = handler.add_chaser(name, slowflashid, "SlowFlash", duration=7900)
+        handler.add_button(name, "SlowFlash", chaserid, "C")
+
             
 class Queue:
     def __init__(self):
@@ -1011,5 +1034,4 @@ class Show:
         self.song_data = song_data
         self.bpm = struct["bpm"]
         self.mp3_path = song_data["file"]
-        self.bpminterval = 60 / (struct["bpm"]*1.02)
-        self.beatinterval = 60 / struct["bpm"]
+        self.beatinterval = 60 / (struct["bpm"]*1.02)
