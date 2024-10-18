@@ -102,12 +102,19 @@ class QLCHandler:
 
         return str(len(self.shows[showname]["Functions"])-1)
 
-    def add_track(self, scripts, showname, function_names):
+    def add_track(self, show_scripts, showname, function_names):
         dom = self.shows[showname]["dom"]
+        # Initialize scripts with powershell command
+        script_ids = [
+            self.add_script(
+                showname, 
+                [self.powershell_script(f"{showname}.wav")],
+                "powershell_script"
+            )
+        ]
         # Assume add_script is a function that adds a script and returns its ID
-        script_ids = []
-        for i in range(len(scripts)):
-            script_ids.append(self.add_script(showname, scripts[i], function_names[i]))
+        for i in range(len(show_scripts)):
+            script_ids.append(self.add_script(showname, show_scripts[i], function_names[i]))
 
         attributes = {"ID": str(len(self.shows[showname]["Functions"])), "Type": "Collection", "Name": "New Collection 14"}
         self.add_element(showname, "Engine", "Function", attributes)
@@ -115,6 +122,9 @@ class QLCHandler:
         # Get the newly created collection
         engine = dom.getElementsByTagName("Engine")[0]
         collection = engine.getElementsByTagName("Function")[-1]
+
+        # Add powershell script
+
 
         # Add the script IDs as steps
         for i, script_id in enumerate(script_ids):
@@ -248,3 +258,8 @@ class QLCHandler:
         # Write the XML declaration, DOCTYPE declaration, and XML string to the file
         with open(showpath, 'w') as f:
             f.write(dom.toprettyxml(indent="  "))
+
+    def powershell_script(self, filename):
+        # Create the script line
+        script_line = f'systemcommand:"C:\\ProgramData\\QLCshows\\play_song.bat" arg:{filename}'
+        return script_line

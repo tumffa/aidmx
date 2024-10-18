@@ -1,8 +1,10 @@
-from pathlib import Path
 import allin1
+import os
 import json
+from pathlib import Path
 from allin1 import demix, helpers
 from dataclasses import asdict
+from pydub import AudioSegment
 from typing import Union, List
 from services import audio_analyzer
 
@@ -38,8 +40,18 @@ class DataManager:
     def get_song(self, song_name):
         return self.songs.get(song_name, None)
     
+    def convert_to_wav(self, filepath):
+        # Convert the file to wav
+        audio = AudioSegment.from_file(filepath)
+        audio.export(filepath[:-4] + ".wav", format="wav")
+        os.remove(filepath)
+        return filepath[:-4] + ".wav"
+    
     def extract_data(self, audio_name, filepath):
         print(audio_name)
+        # Check if the file is an mp3 and convert it to wav
+        if filepath.endswith(".mp3"):
+            filepath = self.convert_to_wav(filepath)
         if audio_name not in self.songs:
             self.songs[audio_name] = {}
             self.songs[audio_name]["file"] = filepath
@@ -101,7 +113,7 @@ class DataManager:
     
     def update_songdata(self, song_name):
         content = {
-            "file": f"{self.data_path.resolve()}/songs/{song_name}.mp3",
+            "file": f"{self.data_path.resolve()}/songs/{song_name}.wav",
             "analyzed": f"{self.struct_path.resolve()}/{song_name}.json",
             "demixed": f"{self.demix_path.resolve()}/htdemucs/{song_name}"
             }

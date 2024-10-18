@@ -15,11 +15,24 @@ class QueueManager:
         self.qlc = qlc
         self.structurer = ShowStructurer(data_manager)
 
-    def analyze_file(self, audio_name, filepath, strobes=True):
+    def analyze_file(self, audio_name, filepath=None, strobes=True):
         print(f"Analyzing track {audio_name}")
+        
         if not filepath:
-            filepath = "{}/songs/{}.mp3".format(self.dm.return_path("data"), audio_name)
-            print(f"Using default path: {filepath}")
+            # Check for both .mp3 and .wav files
+            mp3_path = "{}/songs/{}.mp3".format(self.dm.return_path("data"), audio_name)
+            wav_path = "{}/songs/{}.wav".format(self.dm.return_path("data"), audio_name)
+            
+            if os.path.exists(mp3_path):
+                filepath = mp3_path
+                print(f"Using default path: {filepath}")
+            elif os.path.exists(wav_path):
+                filepath = wav_path
+                print(f"Using default path: {filepath}")
+            else:
+                print(f"No file found for {audio_name} in default paths.")
+                return
+    
         self.dm.extract_data(audio_name, os.path.abspath(filepath))
         self.analyze_data(audio_name, strobes)
 
@@ -34,7 +47,7 @@ class QueueManager:
 
     def analyze_queue(self, queue_folder):
         for file in os.listdir(queue_folder):
-            if file.endswith(".mp3"):
+            if file.endswith(".wav"):
                 audio_name = file[:-4]
                 self.analyze_file(audio_name, f"{queue_folder}/{file}")
                 self.queue.append(audio_name)
@@ -49,9 +62,13 @@ class QueueManager:
         print("--------------------------Analyzing all songs--------------------------")
         for file in queue:
             audio_name = file
+            if file.endswith(".wav"):
+                file_type = "wav"
+            elif file.endswith(".mp3"):
+                file_type = "mp3"
             print(f"AUTOANALYSIS: Analyzing track {audio_name}")
             self.analysed.append(audio_name)
-            self.analyze_file(audio_name, f"{folder}/{file}.mp3")
+            self.analyze_file(audio_name, f"{folder}/{file}{file_type}")
 
     def auto_play_track(self, audio_name):
         data = self.dm.get_song(audio_name)

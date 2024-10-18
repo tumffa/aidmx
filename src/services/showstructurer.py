@@ -836,6 +836,8 @@ class ShowStructurer:
         return segment
 
     def generate_show(self, name, qxw, strobes=True):
+        # delay for powershell command
+        delay = 1000
         qxw.create_copy(name)
         scripts = []
         function_names = []
@@ -844,24 +846,25 @@ class ShowStructurer:
         sections = show.struct["chorus_sections"]
         segments = show.struct["segments"]
         
-        #Add premade chasers
+        # Add premade chasers
         self.add_chasers(name, show, qxw)
 
         if strobes:
             onset_parts = show.struct["onset_parts"]
             for part in onset_parts:
                 queues = []
-                queues.append(self.randomstrobe(name, show, length=part[1]*1000-part[0]*1000, start=part[0]*1000, queuename=f"strobe{part[0]}", waittime=20))
+                queues.append(self.randomstrobe(name, show, length=part[1]*1000-part[0]*1000, start=part[0]*1000 + delay, queuename=f"strobe{part[0]}", waittime=20))
                 scripts.append(self.combine(queues))
                 function_names.append(f"strobe{part[0]}")
 
         queues = []
         pauses = show.struct["silent_ranges"]
+
         for pause in pauses:
             pause_start = pause[0] / 43
             pause_end = pause[1] / 43
             pausename = f"pause{str(pause[0])[:5]}"
-            queues.append(self.pause((pause_end - pause_start), type="blackout", queuename=pausename, start=pause_start*1000))
+            queues.append(self.pause((pause_end - pause_start), type="blackout", queuename=pausename, start=pause_start*1000 + delay))
         scripts.append(self.combine(queues))
         function_names.append("pauses")
 
@@ -872,13 +875,15 @@ class ShowStructurer:
         if len(show.struct["focus"]) == 1:
             onefocus = True
         lastchaser = random.choice(["FastPulse", "SideToSide"])
+        lastidle = random.choice(["Pulse", "SlowFlash"])
+
         for i in range(i, len(segments)):
+            start_time = segments[i]["start"]*1000 + delay
             queues = []
             found = False
+
             for section in sections:
-
                 if segments[i]["start"] == section["seg_start"]:
-
                     print("found")
                     found = True
                     length = (segments[i]["end"] - segments[i]["start"])*1000
@@ -886,14 +891,14 @@ class ShowStructurer:
                     last_choice = None
                     if segments[i]["label"] == show.struct["focus"]["first"]:
                         if onefocus == False:
-                            queues.append(self.fastpulse(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"fastpulse{i}"))
+                            queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
                         elif lastchaser == "FastPulse" and "abovewash" in self.universe:
-                            queues.append(self.side_to_side(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"sidetoside{i}"))
+                            queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
                             lastchaser = "SideToSide"
                         elif lastchaser == "SideToSide" or "abovewash" not in self.universe:
-                            queues.append(self.fastpulse(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"fastpulse{i}"))
+                            queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
                             if "abovewash" in self.universe:
-                                queues.append(self.alternate_flood(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternateflood{i}"))
+                                queues.append(self.alternate_flood(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
                             lastchaser = "FastPulse"
                     else:
                         type = random.choice(types)
@@ -903,19 +908,29 @@ class ShowStructurer:
                         if "abovewash" not in self.universe:
                             type = "alternate"
                         if type == "alternate":
-                            queues.append(self.alternate(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"alternateflood{i}"))
+                            queues.append(self.alternate(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
                         else:
-                            queues.append(self.side_to_side(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"sidetoside{i}"))
+                            queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
                     break
 
             if found == False:
-                
                 length = (segments[i]["end"] - segments[i]["start"])*1000
-                queues.append(self.idle(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"idle{i}"))
-                if "abovewash" in self.universe:
-                    queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=segments[i]["start"]*1000, color1="green", color2="red", queuename=f"pulse{i}"))
+                queues.append(self.idle(name, show=show, length=length, start=start_time, queuename=f"idle{i}"))
+
+                if segments[i-1]["label"] == segments[i]["label"]:
+                    if lastidle == "Pulse" and "abovewash" in self.universe:
+                        queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
+                        lastidle = "Pulse"
+                    else:
+                        queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
+                        lastidle = "SlowFlash"
                 else:
-                    queues.append(self.slow_flash(name, show=show, length=length, start=segments[i]["start"]*1000, queuename=f"slowflash{i}"))
+                    if lastidle == "Pulse":
+                        queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
+                        lastidle = "SlowFlash"
+                    elif "abovewash" in self.universe:
+                        queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
+                        lastidle = "Pulse"
 
             scripts.append(self.combine(queues))
             function_names.append(str(segments[i]["start"]))
@@ -1033,5 +1048,5 @@ class Show:
         self.struct = struct
         self.song_data = song_data
         self.bpm = struct["bpm"]
-        self.mp3_path = song_data["file"]
+        self.wav_path = song_data["file"]
         self.beatinterval = 60 / (struct["bpm"]*1.02)
