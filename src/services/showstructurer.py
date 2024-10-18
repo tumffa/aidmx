@@ -837,7 +837,7 @@ class ShowStructurer:
 
     def generate_show(self, name, qxw, strobes=True):
         # delay for powershell command
-        delay = 1000
+        delay = 900
         qxw.create_copy(name)
         scripts = []
         function_names = []
@@ -916,7 +916,6 @@ class ShowStructurer:
             if found == False:
                 length = (segments[i]["end"] - segments[i]["start"])*1000
                 queues.append(self.idle(name, show=show, length=length, start=start_time, queuename=f"idle{i}"))
-
                 if segments[i-1]["label"] == segments[i]["label"]:
                     if lastidle == "Pulse" and "abovewash" in self.universe:
                         queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
@@ -925,7 +924,7 @@ class ShowStructurer:
                         queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
                         lastidle = "SlowFlash"
                 else:
-                    if lastidle == "Pulse":
+                    if lastidle == "Pulse" or "abovewash" not in self.universe:
                         queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
                         lastidle = "SlowFlash"
                     elif "abovewash" in self.universe:
