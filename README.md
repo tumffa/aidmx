@@ -3,7 +3,12 @@
 This project takes an MP3 file and generates a synchronized light show script for QLC+ based on the audio.
 
 ## Dependencies
-Install all-in-one models from https://github.com/mir-aidj/all-in-one?tab=readme-ov-file
+Install **allin1**: https://github.com/mir-aidj/all-in-one?tab=readme-ov-file
+
+Rest of dependencies:
+```
+pip install -r requirements.txt
+```
 
 ## Features
 - **BPM Prediction**: Uses models to estimate the BPM of the song.
