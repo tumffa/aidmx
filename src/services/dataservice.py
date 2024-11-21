@@ -2,8 +2,6 @@ import allin1
 import os
 import json
 from pathlib import Path
-from allin1 import demix, helpers
-from dataclasses import asdict
 from pydub import AudioSegment
 from typing import Union, List
 from services import audio_analyzer
@@ -66,7 +64,7 @@ class DataManager:
         try:
             if not path.exists():
                 analyzed = allin1.analyze(Path(filepath))
-                helpers.save_results(analyzed, self.struct_path, audio_name)
+                allin1.helpers.save_results(analyzed, self.struct_path, audio_name)
             else:
                 print("Already analyzed")
         except Exception as e:
@@ -82,7 +80,7 @@ class DataManager:
             self.songs[audio_name]["demixed"] = str(path)
         try:
             if not demix_exists:
-                demix.demix([Path(filepath)], demix_dir=self.demix_path, device='cuda:0')
+                allin1.demix.demix([Path(filepath)], demix_dir=self.demix_path, device='cuda:0')
             else:
                 print("Already demixed")
         except Exception as e:

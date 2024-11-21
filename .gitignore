@@ -3,7 +3,6 @@
 *.wav
 **__pycache__**
 /*.png
-/*.txt
 showfile.txt
 /struct
 /demix

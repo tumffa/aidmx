@@ -1,7 +1,6 @@
 import librosa
-import numpy as np
-from pathlib import Path
 from services import onsets
+
 
 def initialize_rms(song_data, name, demix_path, segments):
     rms = [float(x) for x in get_rms(song_data)[0]]

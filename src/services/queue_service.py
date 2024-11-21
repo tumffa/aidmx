@@ -1,10 +1,10 @@
-from .qlc_service import QLCHandler
-from .showstructurer import ShowStructurer
-from services import audio_analyzer
 import os
 import random
 import subprocess
 import threading
+from .showstructurer import ShowStructurer
+from services import audio_analyzer
+
 
 class QueueManager:
     def __init__(self, setupfile, data_manager, qlc):

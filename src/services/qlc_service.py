@@ -1,4 +1,4 @@
-from xml.dom.minidom import parse, Document
+from xml.dom.minidom import parse
 import shutil
 import os
 

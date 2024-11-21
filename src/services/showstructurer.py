@@ -1,6 +1,7 @@
 import re
 import random
 
+
 class ShowStructurer:
     def __init__(self, data_manager):
         self.dm = data_manager
