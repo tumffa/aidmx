@@ -1,6 +1,7 @@
-from xml.dom.minidom import parse
 import shutil
 import os
+from xml.dom.minidom import parse
+from utils.config import get_config, to_windows_path
 
 class QLCHandler:
     def __init__(self, filename, setup_path):
@@ -8,7 +9,8 @@ class QLCHandler:
         self.shows = {}
         self.filename = filename
 
-        directory = '/mnt/c/ProgramData/QLCshows/shows'
+        program_data_path = get_config("program_data_path")
+        directory = f'{program_data_path}/AIQLCshows/shows'
         # Check if the shows-directory exists
         if not os.path.exists(directory):
             os.makedirs(directory)
@@ -122,9 +124,6 @@ class QLCHandler:
         # Get the newly created collection
         engine = dom.getElementsByTagName("Engine")[0]
         collection = engine.getElementsByTagName("Function")[-1]
-
-        # Add powershell script
-
 
         # Add the script IDs as steps
         for i, script_id in enumerate(script_ids):
@@ -261,5 +260,7 @@ class QLCHandler:
 
     def powershell_script(self, filename):
         # Create the script line
-        script_line = f'systemcommand:"C:\\ProgramData\\QLCshows\\play_song.bat" arg:{filename}'
+        program_data_path = get_config("program_data_path")
+        program_data_path = to_windows_path(program_data_path)
+        script_line = f'systemcommand:"{program_data_path}\\AIQLCshows\\play_song.bat" arg:{filename}'
         return script_line

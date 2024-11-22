@@ -27,21 +27,6 @@ class CommandHandler:
             if len(command) == 3:
                 strobe = False
             self.queuemanager.analyze_file(command[1], None, strobe)
-        elif command[0] == "af":
-            if len(command) == 2:
-                self.queuemanager.choose_folder(command[1])
-            else:
-                print("Invalid number of arguments")
-        elif command[0] == "play":
-            if len(command) == 2:
-                self.queuemanager.play_track(command[1])
-            else:
-                print("Invalid number of arguments")
-        elif command[0] == "a":
-            if len(command) == 2:
-                self.queuemanager.auto_play_track(command[1])
-            else:
-                print("Invalid number of arguments")
         elif command[0] == "sync":
             self.queuemanager.sync_with_struct()
         elif command[0] == "analyzedata":

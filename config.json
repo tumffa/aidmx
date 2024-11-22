@@ -3,5 +3,6 @@
     "struct_path": "./struct",
     "demix_path": "./demix",
     "setup_path": "./data/Newsetup.qxw",
-    "wsl_win_songs_path": "\\wsl.localhost\\Ubuntu-22.04\\home\\tumffa\\aidmx\\data\\songs"
+    "win_app_path": "/wsl.localhost/Ubuntu-22.04/home/tumffa",
+    "program_data_path": "/mnt/c/ProgramData"
 }
