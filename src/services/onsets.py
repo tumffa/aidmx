@@ -1,6 +1,5 @@
 import librosa
 import numpy as np
-from pathlib import Path
 
 
 def detect_onsets(filename, threshold):
@@ -125,18 +124,29 @@ def convert_to_start_end_times(grouped_onsets):
             start_end_times.append((start, end))
     return start_end_times
 
-def get_onset_parts(name, segments, demix_path: Path):
-    onsets = detect_onsets(demix_path / "htdemucs" / name / "drums.wav", threshold=0.15)
+def get_onset_parts(segments=None, filepath=None):
+    if not filepath:
+        return []
+    if segments is None:
+        y, sr = librosa.load(filepath)
+        duration = librosa.get_duration(y=y, sr=sr)
+        segments = [{"start": 0, "end": duration}]
+
+    onsets = detect_onsets(filepath, threshold=0.15)
     merged_onsets = [merge_close_values(times, threshold=0.055) for times in onsets]
 
     segment_rates = onset_rate_per_segment(merged_onsets, segments)
-    for i, segment in enumerate(segments):
-        print(f'Segment {i}: {segment_rates[i]} onsets per second')
 
     grouped_onsets = [group_close_values(times, segments, segment_rates) for times in merged_onsets]
     grouped_onsets = grouped_onsets[0]
 
     fused_onsets = fuse_close_groups(grouped_onsets)
     fused_onsets = convert_to_start_end_times(fused_onsets)
-    
     return fused_onsets
+
+# Example usage
+if __name__ == "__main__":
+    your_filepath = "/home/tumffa/aidmx/demix/htdemucs/mycurse/drums.wav" # full path to your file
+    segments = None # set this to [ {"start": 0, "end": 10}, {"start": 10, "end": 20} ] etc. if you want specific times
+    onsets = get_onset_parts(segments=segments, filepath=your_filepath)
+    print(onsets)

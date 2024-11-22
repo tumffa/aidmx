@@ -2,7 +2,7 @@ import librosa
 from services import onsets
 
 
-def initialize_rms(song_data, name, demix_path, segments):
+def initialize_rms(song_data, name, onset_file, segments):
     rms = [float(x) for x in get_rms(song_data)[0]]
     bass_rms = [float(x) for x in get_rms(song_data, category=["bass"])[0]]
     drums_rms = [float(x) for x in get_rms(song_data, category=["drums"])[0]]
@@ -15,7 +15,7 @@ def initialize_rms(song_data, name, demix_path, segments):
     other_average = sum(other_rms) / len(other_rms)
     vocals_average = sum(vocals_rms) / len(vocals_rms)
 
-    onset_parts = onsets.get_onset_parts(name, segments, demix_path)
+    onset_parts = onsets.get_onset_parts(segments=segments, filepath=onset_file)
 
     params=[
         {

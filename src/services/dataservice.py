@@ -89,9 +89,10 @@ class DataManager:
         data = self.get_struct_data(audio_name)
         if "rms" not in data or "total_rms" not in data:
             segments = self.get_struct_data_by_key(audio_name, "segments")
+            onset_file = self.demix_path / "htdemucs" / audio_name / "drums.wav"
             params = audio_analyzer.initialize_rms(self.songs[audio_name], 
                                                    audio_name, 
-                                                   self.demix_path, 
+                                                   onset_file, 
                                                    segments)
             self.update_struct_data(audio_name, params, indent=2)
             struct_data = self.get_struct_data(audio_name)
