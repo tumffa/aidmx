@@ -3,9 +3,11 @@
 This project takes an MP3 file and generates a synchronized light show script for QLC+ based on the audio.
 
 ## Dependencies
-Install **allin1**: https://github.com/mir-aidj/all-in-one?tab=readme-ov-file
+1. Initialize conda environment from environment.yml.
 
-Rest of dependencies:
+2. Install **allin1**: https://github.com/mir-aidj/all-in-one?tab=readme-ov-file
+
+3. Rest of dependencies:
 ```
 pip install -r requirements.txt
 ```
