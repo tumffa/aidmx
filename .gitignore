@@ -1,0 +1,11 @@
+*.qxw
+*.mp3
+*.wav
+**__pycache__**
+/*.png
+showfile.txt
+/struct
+/demix
+/data
+/AIQLCshows/play_song_modified.bat
+/src/services/larsnet/inference_models

@@ -1,0 +1,8 @@
+{
+    "data_path": "./data",
+    "struct_path": "./struct",
+    "demix_path": "./demix",
+    "setup_path": "./data/Newsetup.qxw",
+    "win_app_path": "/wsl.localhost/Ubuntu-22.04/home/tumffa",
+    "program_data_path": "/mnt/c/ProgramData"
+}
