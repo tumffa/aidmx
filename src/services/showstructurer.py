@@ -25,6 +25,14 @@ class ShowStructurer:
                   "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211}
         }
 
+        # Dimmer map for help with seperating dimmer commands
+        self.fixture_dimmer_map = {}
+        for group_name, group in self.universe.items():
+            for fixture_key, fixture in group.items():
+                fixture_id = fixture["id"]
+                dimmer_channel = fixture["dimmer"]
+                self.fixture_dimmer_map[fixture_id] = dimmer_channel
+
     def get_songdata(self, name):
         struct = self.dm.get_struct_data(name)
         song_data = self.dm.get_song(name)
@@ -35,6 +43,32 @@ class ShowStructurer:
         show = Show(name, struct, song_data)
         self.shows[name] = show
         return show
+    
+    def _get_envelope_strength(self, light_strength_envelope, current_time_sec):
+        """Helper method to get strength value from envelope at a specific time"""
+        if not light_strength_envelope:
+            return 1.0
+            
+        env_times = light_strength_envelope.get("times", [])
+        env_values = light_strength_envelope.get("values", [])
+        
+        if not env_times or not env_values:
+            return 1.0
+            
+        # Find the closest time point
+        closest_idx = 0
+        min_diff = float('inf')
+        
+        for i, t in enumerate(env_times):
+            diff = abs(t - current_time_sec)
+            if diff < min_diff:
+                min_diff = diff
+                closest_idx = i
+        
+        if closest_idx < len(env_values):
+            return env_values[closest_idx]
+        else:
+            return 1.0
 
     def _setfixture(self, fixture, channel, value, comment=""):
         if value > 255:
@@ -88,7 +122,7 @@ class ShowStructurer:
         temp = []
         if "colors" in fixture:
             color_1 = fixture["colors"][color]
-            temp.append(self._setfixture(fixture["id"], fixture["color"], color_1, f"Dimmer on"))
+            temp.append(self._setfixture(fixture["id"], fixture["color"], color_1, f"color"))
         elif fixture["colortype"] == "seperate":
             color_map = {
                 "white": {"red": 255, "green": 255, "blue": 255},
@@ -104,9 +138,9 @@ class ShowStructurer:
 
             if color in color_map:
                 channels = color_map[color]
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], channels["red"], f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], channels["green"], f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], channels["blue"], f"Dimmer on"))
+                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], channels["red"], f"color"))
+                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], channels["green"], f"color"))
+                temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], channels["blue"], f"color"))
         return temp
     
     def slow_flash(self, name, show, length=30000.0, start=0, queuename="slowflash0"):
@@ -135,8 +169,8 @@ class ShowStructurer:
                 color = random.choice(colors)
             temp = []
             for fixture in group.values():
-                temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], "Open shutters"))
-                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255*(iterations/50), f"{time}"))
+                temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], "shutters"))
+                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255*(iterations/50), f"dimmer"))
                 temp += self.calculate_colors(fixture, color)
             iterations += 1
             slowflash_queue.enqueue(temp)
@@ -792,15 +826,38 @@ class ShowStructurer:
                 result["queue"] = blind_queue
                 return result
 
-    def combine(self, queues):
+    def combine(self, queues, seperate_dimmer=True, light_strength_envelope=None):
+        """
+        Combines multiple command queues into a single sequence,
+        keeping track of fixture dimmer values separately.
+        
+        Args:
+            queues: List of queue dictionaries
+            seperate_dimmer: If True, separate dimmer commands from main commands
+            light_strength_envelope: Envelope for scaling dimmer values
+            
+        Returns:
+            Combined list of commands with dimmer commands separated
+        """
+        # Main pattern commands (excluding dimmer controls)
         segment = []
+
+        # Separate list for dimmer commands
+        segment_dimmers = []
+        
+        # Track the last set dimmer value for each fixture
+        fixture_dimmers = {}  # {fixture_id: {"channel": channel, "value": value}}
+        
         command_queues = {}
         for queue in queues:
             command_queues[queue["name"]] = queue["queue"]
+        
         times = {}
         for queue in queues:
             times[queue["name"]] = queue["queue"].dequeue()
+        
         index = 0
+        
         while len(times) > 0:
             do_not_execute = []
             min_time = min(times.values())
@@ -809,6 +866,7 @@ class ShowStructurer:
                 q = ('flood', min_time)
             else:
                 q = min_queues[0], min_time
+                
             if "pause" not in q[0]:
                 index2 = int(re.search(r'\d+$', q[0]).group())
                 if index2 > index:
@@ -818,25 +876,56 @@ class ShowStructurer:
                         key_index = int(re.search(r'\d+$', key).group())
                         if key_index < index:
                             do_not_execute.append(key)
+            
             queue = command_queues[q[0]]
+            
+            # Add wait to main segment
             segment.append(self._wait(q[1], f"Wait for {q[0]}"))
+            segment_dimmers.append(self._wait(q[1], f"Wait for {q[0]}"))
+            
+            # Process time updates
             for name in times:
-                times[name] -= (q[1] + 0)
-
+                times[name] -= q[1]
                 if times[name] < 0:
                     times[name] = 0
+                    
+            # Process commands
             commands = queue.dequeue()
             if commands == None:
                 del times[q[0]]
                 del command_queues[q[0]]
                 continue
+                
             if q[0] not in do_not_execute:
                 for command in commands:
-                    segment.append(command)
+                    match = re.search(r'setfixture:(\d+) ch:(\d+) val:(\d+)', command)
+                    if match:
+                        fixture_id, channel, value = match.groups()
+                        fixture_id = int(fixture_id)
+                        channel = int(channel)
+                        value = int(value)
+                        
+                        # Fast lookup using our map instead of searching nested dictionaries
+                        is_dimmer_command = (fixture_id in self.fixture_dimmer_map and 
+                                        channel == self.fixture_dimmer_map[fixture_id])
+                        
+                        if is_dimmer_command and seperate_dimmer:
+                            # Store the fixture's dimmer value
+                            fixture_dimmers[fixture_id] = {
+                                "channel": channel,
+                                "value": value
+                            }
+                            segment_dimmers.append(command)
+                        else:
+                            # For non-dimmer commands, add to main segment
+                            segment.append(command)
+
+            # Get next wait period
             wait = queue.dequeue()
             if wait:
                 times[q[0]] = wait
-        return segment
+        
+        return segment, segment_dimmers
 
     def generate_show(self, name, qxw, strobes=True):
         # delay for powershell command
@@ -857,7 +946,7 @@ class ShowStructurer:
             for part in onset_parts:
                 queues = []
                 queues.append(self.randomstrobe(name, show, length=part[1]*1000-part[0]*1000, start=part[0]*1000 + delay, queuename=f"strobe{part[0]}", waittime=20))
-                scripts.append(self.combine(queues))
+                scripts.append(self.combine(queues)[0])
                 function_names.append(f"strobe{part[0]}")
 
         queues = []
@@ -868,7 +957,7 @@ class ShowStructurer:
             pause_end = pause[1] / 43
             pausename = f"pause{str(pause[0])[:5]}"
             queues.append(self.pause((pause_end - pause_start), type="blackout", queuename=pausename, start=pause_start*1000 + delay))
-        scripts.append(self.combine(queues))
+        scripts.append(self.combine(queues)[0])
         function_names.append("pauses")
 
         i = 0
@@ -934,8 +1023,11 @@ class ShowStructurer:
                         queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
                         lastidle = "Pulse"
 
-            scripts.append(self.combine(queues))
+            segment_queue, segment_dimmers = self.combine(queues, start_time)
+            scripts.append(segment_queue)
+            scripts.append(segment_dimmers)
             function_names.append(str(segments[i]["start"]))
+            function_names.append(str(segments[i]["start"]) + "_dimmers")
             i += 1
         qxw.add_track(scripts, name, function_names)
 
@@ -944,70 +1036,70 @@ class ShowStructurer:
 
         queues = []
         queues.append(self.randomstrobe(name, show, length=2000))
-        strobescript = self.combine(queues)
+        strobescript, _ = self.combine(queues, seperate_dimmer=False)
         strobeid = handler.add_script(name, strobescript, "FullStrobe")
         chaserid = handler.add_chaser(name, strobeid, "FullWhiteStrobe", duration=1900)
         handler.add_button(name, "FullWhiteStrobe", chaserid, 3)
 
         queues = []
         queues.append(self.blind(name, show, length=2000))
-        blindscript = self.combine(queues)
+        blindscript, _  = self.combine(queues, seperate_dimmer=False)
         blindid = handler.add_script(name, blindscript, "blind")
         chaserid = handler.add_chaser(name, blindid, "Blind", duration=1900)
         handler.add_button(name, "BLIND", chaserid, 2)
 
         queues = []
         queues.append(self.randomstrobe(name, show, length=2000, strobecolor="random"))
-        strobescript = self.combine(queues)
+        strobescript, _ = self.combine(queues, seperate_dimmer=False)
         strobeid = handler.add_script(name, strobescript, "RandomStrobe")
         chaserid = handler.add_chaser(name, strobeid, "RandomStrobe", duration=1900)
         handler.add_button(name, "RandomStrobe", chaserid, "R")
 
         queues = []
         queues.append(self.randomstrobe(name, show, length=2000, strobecolor="red"))
-        strobescript = self.combine(queues)
+        strobescript, _ = self.combine(queues, seperate_dimmer=False)
         strobeid = handler.add_script(name, strobescript, "RedStrobe")
         chaserid = handler.add_chaser(name, strobeid, "RedStrobe", duration=1900)
         handler.add_button(name, "RedStrobe", chaserid, "T")
 
         queues = []
         queues.append(self.randomstrobe(name, show, length=2000, strobecolor="green"))
-        strobescript = self.combine(queues)
+        strobescript, _ = self.combine(queues, seperate_dimmer=False)
         strobeid = handler.add_script(name, strobescript, "GreenStrobe")
         chaserid = handler.add_chaser(name, strobeid, "GreenStrobe", duration=1900)
         handler.add_button(name, "GreenStrobe", chaserid, "Y")
 
         queues = []
         queues.append(self.randomstrobe(name, show, length=2000, strobecolor="blue"))
-        strobescript = self.combine(queues)
+        strobescript, _ = self.combine(queues, seperate_dimmer=False)
         strobeid = handler.add_script(name, strobescript, "BlueStrobe")
         chaserid = handler.add_chaser(name, strobeid, "BlueStrobe", duration=1900)
         handler.add_button(name, "BlueStrobe", chaserid, "U")
 
         queues = []
         queues.append(self.fastpulse(name, show, length=8000))
-        fastpulsescript = self.combine(queues)
+        fastpulsescript, _ = self.combine(queues, seperate_dimmer=False)
         fastpulseid = handler.add_script(name, fastpulsescript, "FastPulse")
         chaserid = handler.add_chaser(name, fastpulseid, "FastPulse", duration=7900)
         handler.add_button(name, "FastPulse", chaserid, "Z")
 
         queues = []
         queues.append(self.alternate_flood(name, show, length=8000))
-        alternatescript = self.combine(queues)
+        alternatescript, _ = self.combine(queues, seperate_dimmer=False)
         alternateid = handler.add_script(name, alternatescript, "AlternateFlood")
         chaserid = handler.add_chaser(name, alternateid, "AlternateFlood", duration=7900)
         handler.add_button(name, "AlternateFlood", chaserid, "A")
 
         queues = []
         queues.append(self.side_to_side(name, show, length=8000))
-        sidetosidescript = self.combine(queues)
+        sidetosidescript, _ = self.combine(queues, seperate_dimmer=False)
         sidetosideid = handler.add_script(name, sidetosidescript, "SideToSide")
         chaserid = handler.add_chaser(name, sidetosideid, "SideToSide", duration=7900)
         handler.add_button(name, "SideToSide", chaserid, "X")
 
         queues = []
         queues.append(self.slow_flash(name, show, length=8000))
-        slowflashscript = self.combine(queues)
+        slowflashscript, _ = self.combine(queues, seperate_dimmer=False)
         slowflashid = handler.add_script(name, slowflashscript, "SlowFlash")
         chaserid = handler.add_chaser(name, slowflashid, "SlowFlash", duration=7900)
         handler.add_button(name, "SlowFlash", chaserid, "C")
