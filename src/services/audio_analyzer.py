@@ -1,8 +1,8 @@
 import librosa
-from services import onsets
+from services import drum_analysis
 from services.seperate_drums import separate_drums_with_larsnet
 
-def initialize_rms(song_data, name, segments):
+def initialize_song_metrics(song_data, struct_data=None):
     rms = [float(x) for x in get_rms(song_data)[0]]
     bass_rms = [float(x) for x in get_rms(song_data, category=["bass"])[0]]
     drums_rms = [float(x) for x in get_rms(song_data, category=["drums"])[0]]
@@ -19,10 +19,17 @@ def initialize_rms(song_data, name, segments):
     kick_snare_toms, sr = seperate_kick_toms_snare(song_data)
     # Sum of kick, snare, and toms to onsets input
     larsnet_drums = kick_snare_toms["kick"] + kick_snare_toms["snare"] + kick_snare_toms["toms"]
-    onset_parts = onsets.get_onset_parts(segments=segments, input=larsnet_drums, sr=sr)
+    onset_parts = drum_analysis.get_onset_parts(segments=struct_data["segments"], input=larsnet_drums, sr=sr)
+
+    # Analyze drum patterns
+    enriched_segments = drum_analysis.analyze_drum_patterns(
+        demix_path=song_data["demixed"], 
+        beats=struct_data["beats"], 
+        segments=struct_data["segments"])
 
     params=[
         {
+            "segments": enriched_segments,
             "total_rms": total_rms,
             "rms": rms,
             "bass_rms": bass_rms,
@@ -32,11 +39,7 @@ def initialize_rms(song_data, name, segments):
             "bass_average": bass_average,
             "drums_average": drums_average,
             "other_average": other_average,
-            "vocals_average": vocals_average,
-            "kick_rms": librosa.feature.rms(y=kick_snare_toms["kick"])[0].tolist(),
-            "snare_rms": librosa.feature.rms(y=kick_snare_toms["snare"])[0].tolist(),
-            "toms_rms": librosa.feature.rms(y=kick_snare_toms["toms"])[0].tolist(),
-            "larsnet_drums_rms": librosa.feature.rms(y=larsnet_drums)[0].tolist(),
+            "vocals_average": vocals_average
         },
         {
             "onset_parts": onset_parts
@@ -48,7 +51,7 @@ def initialize_rms(song_data, name, segments):
 def seperate_kick_toms_snare(song_data):
     drums_path = f"{song_data['demixed']}/drums.wav"
     output_dir = song_data['demixed']
-    output_dict, sr = separate_drums_with_larsnet(drums_path, output_dir) # ["kick", "snare", "toms"]
+    output_dict, sr = separate_drums_with_larsnet(drums_path, output_dir)
     return output_dict, sr
 
 def get_rms(song_data=None, category=None, path=None)->tuple[list[float], float]:

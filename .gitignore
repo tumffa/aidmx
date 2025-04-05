@@ -1,5 +1,6 @@
 *.qxw
 *.mp3
+*.mp4
 *.wav
 **__pycache__**
 /*.png

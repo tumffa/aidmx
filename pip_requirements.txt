@@ -21,3 +21,4 @@ wheel==0.41.2
 numpy==1.26.2
 librosa
 pydub
+scipy

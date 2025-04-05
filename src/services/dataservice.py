@@ -92,9 +92,9 @@ class DataManager:
         data = self.get_struct_data(audio_name)
         if "rms" not in data or "total_rms" or "larsnet_drums_y" not in data:
             segments = self.get_struct_data_by_key(audio_name, "segments")
-            params = audio_analyzer.initialize_rms(self.songs[audio_name], 
-                                                   audio_name, 
-                                                   segments)
+            struct_data = self.get_struct_data(audio_name)
+            params = audio_analyzer.initialize_song_metrics(self.songs[audio_name], 
+                                                    struct_data=struct_data)
             self.update_struct_data(audio_name, params, indent=2)
             struct_data = self.get_struct_data(audio_name)
             params = audio_analyzer.struct_stats(self.songs[audio_name], 

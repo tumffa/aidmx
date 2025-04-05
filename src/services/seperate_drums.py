@@ -7,7 +7,7 @@ import numpy as np
 import scipy.io.wavfile as wav
 import librosa
 
-def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1.0, device="cpu"):
+def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=0.7, device="cuda"):
     """
     Separates drum components using LarsNet with a local conda environment.
     
@@ -15,12 +15,12 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1.0, 
         drum_audio_path (str): Path to the drums audio file.
         output_dir (str): Directory to save separated components.
         wiener_filter (float): α parameter for Wiener filtering (default: 1.0).
-        device (str): Device to use for inference (default: "cpu").
+        device (str): Device to use for inference (default: "cuda").
         
     Returns:
         tuple: (waveform, sample_rate) for the combined drums
     """
-    print(f"Separating drum components using LarsNet...")
+    print(f"Separating drum components using LarsNet on {device}...")
     
     # Determine LarsNet path
     larsnet_paths = [
@@ -194,6 +194,9 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1.0, 
                     toms_audio = toms_audio[:max_length]
             except Exception as e:
                 print(f"Error loading toms audio: {e}. Continuing without toms.")
+
+        # Resample
+        
 
         output = {}
         output['kick'] = kick_audio
