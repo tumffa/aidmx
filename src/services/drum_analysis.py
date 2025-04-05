@@ -918,6 +918,9 @@ def find_beat_defining_hits(segment, kick_beat_matches, snare_beat_matches, wind
     """
     if not segment or "drum_analysis" not in segment:
         return segment
+    
+    # Choose whether to match to beat or hit time
+    use_beat_time = True
         
     drum_analysis = segment["drum_analysis"]
     
@@ -933,6 +936,8 @@ def find_beat_defining_hits(segment, kick_beat_matches, snare_beat_matches, wind
         # For each kick beat match, check if there's a period timeframe nearby
         # This ensures strong hits that align with the beat are included
         for hit_time, beat_time, strength in kick_beat_matches:
+            if use_beat_time:
+                hit_time = beat_time
             # Check if this hit is close to any period timeframe
             is_close_to_timeframe = False
             for tf in period_timeframes:
@@ -999,6 +1004,8 @@ def find_beat_defining_hits(segment, kick_beat_matches, snare_beat_matches, wind
         
         # For each snare beat match, check if there's a period timeframe nearby
         for hit_time, beat_time, strength in snare_beat_matches:
+            if use_beat_time:
+                hit_time = beat_time
             # Check if this hit is close to any period timeframe
             is_close_to_timeframe = False
             for tf in period_timeframes:
@@ -1055,17 +1062,19 @@ def find_beat_defining_hits(segment, kick_beat_matches, snare_beat_matches, wind
     
     return segment
 
-def calculate_light_strength_envelope(segment, resolution_ms=20):
+def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1):
     """
     Calculate a combined strength envelope from kick and snare beat-defining hits.
-    Only real hits should significantly increase intensity, not phantom grid markers.
+    Uses ONLY real hits (no phantom/grid markers) for more authentic light patterns.
+    Also identifies and returns time ranges where envelope exceeds baseline (0.5).
     
     Args:
         segment: Segment dictionary containing drum_analysis with beat_defining_hits
         resolution_ms: Time resolution in milliseconds for the envelope
+        min_strength: Minimum strength value for the envelope
     """
     if not segment or "drum_analysis" not in segment:
-        return {"times": [], "values": [], "segment_start": 0, "segment_end": 0}
+        return {"times": [], "values": [], "segment_start": 0, "segment_end": 0, "active_ranges": []}
     
     drum_analysis = segment["drum_analysis"]
     segment_start = segment["start"]
@@ -1096,24 +1105,30 @@ def calculate_light_strength_envelope(segment, resolution_ms=20):
     if not kick_hits and not snare_hits:
         return {
             "times": [segment_start, segment_end],
-            "values": [0.5, 0.5],
+            "values": [min_strength, min_strength],
             "segment_start": segment_start,
-            "segment_end": segment_end
+            "segment_end": segment_end,
+            "active_ranges": []  # No active ranges since all values are baseline
         }
     
     # Calculate average strengths for real hits only
-    avg_kick_strength = sum(strength for _, strength in kick_original_hits) / max(1, len(kick_original_hits)) if kick_original_hits else 0.5
-    avg_snare_strength = sum(strength for _, strength in snare_original_hits) / max(1, len(snare_original_hits)) if snare_original_hits else 0.5
+    avg_kick_strength = sum(strength for _, strength in kick_original_hits) / max(1, len(kick_original_hits)) if kick_original_hits else min_strength
+    avg_snare_strength = sum(strength for _, strength in snare_original_hits) / max(1, len(snare_original_hits)) if snare_original_hits else min_strength
     
-    # Filter defining hits to mark phantom hits
+    # Filter defining hits to ONLY include real hits - CHANGED HERE
     filtered_hits = []
     for time, strength, is_snare in [(t, s, False) for t, s in kick_hits] + [(t, s, True) for t, s in snare_hits]:
-        # Check if this is a real hit or a phantom grid marker
-        is_real_hit = (not is_snare and abs(min([abs(time - rt) for rt in real_kick_times], default=999)) < 0.05) or \
-                      (is_snare and abs(min([abs(time - rt) for rt in real_snare_times], default=999)) < 0.05)
+        # Check if this is a real hit (not a phantom grid marker)
+        is_real_hit = (not is_snare and any(abs(time - rt) < 0.05 for rt in real_kick_times)) or \
+                      (is_snare and any(abs(time - rt) < 0.05 for rt in real_snare_times))
         
-        # Add with flag for real/phantom status
-        filtered_hits.append((time, strength, is_snare, is_real_hit))
+        # Only add real hits (completely exclude phantom hits)
+        if is_real_hit:
+            # Use fixed strength values for kick/snare
+            if is_snare:
+                filtered_hits.append((time, 1.0, is_snare, True))  # Snare hits = 1.0
+            else:
+                filtered_hits.append((time, 0.85, is_snare, True))  # Kick hits = 0.85
     
     # Sort by time
     filtered_hits.sort(key=lambda x: x[0])
@@ -1126,31 +1141,24 @@ def calculate_light_strength_envelope(segment, resolution_ms=20):
     # Start with baseline at segment start
     current_time = segment_start
     envelope_times.append(current_time)
-    envelope_values.append(0.5)  # Baseline strength
+    envelope_values.append(min_strength)  # Baseline strength
     
     # Add points for each time step
     while current_time <= segment_end:
-        current_value = 0.5  # Baseline
+        current_value = min_strength  # Baseline
         
         # Find nearby hits (within window)
         window = 0.1  # 100ms window for hit influence
         nearby_kicks = []
         nearby_snares = []
         
-        for hit_time, strength, is_snare, is_real_hit in filtered_hits:
+        # Simplified because we know all hits are real now
+        for hit_time, strength, is_snare, _ in filtered_hits:
             if abs(hit_time - current_time) <= window:
-                # Only use real hits for significant strength increases
-                if is_real_hit:
-                    if not is_snare:  # Kick
-                        nearby_kicks.append((hit_time, strength))
-                    else:  # Snare
-                        nearby_snares.append((hit_time, strength))
-                # For phantom hits, only allow very small contribution
-                elif abs(hit_time - current_time) < 0.02:  # Very close to grid point
-                    if not is_snare:  # Kick
-                        nearby_kicks.append((hit_time, strength * 0.0))  # Reduced impact
-                    else:  # Snare
-                        nearby_snares.append((hit_time, strength * 0.0))  # Reduced impact
+                if not is_snare:  # Kick
+                    nearby_kicks.append((hit_time, 0.85))  # Fixed strength for kicks
+                else:  # Snare
+                    nearby_snares.append((hit_time, 1.0))  # Fixed strength for snares
         
         # Calculate strength from nearby hits
         # Process kicks first
@@ -1158,37 +1166,25 @@ def calculate_light_strength_envelope(segment, resolution_ms=20):
         if nearby_kicks:
             strongest_kick = max(nearby_kicks, key=lambda x: x[1])
             kick_time_diff = abs(strongest_kick[0] - current_time)
-            kick_strength = strongest_kick[1]
             
             # Time falloff - closer hits have more influence
             time_weight = 1.0 - (kick_time_diff / window)
-            
-            # Calculate kick contribution
-            kick_value = 0.7 + (kick_strength - avg_kick_strength * 0.5) * 0.3
-            kick_value = max(0.5, min(0.85, kick_value))  # More conservative range
-            
-            kick_contribution = kick_value * time_weight
+            kick_contribution = 0.85 * time_weight  # Fixed kick strength
         
         # Process snares
         snare_contribution = 0
         if nearby_snares:
             strongest_snare = max(nearby_snares, key=lambda x: x[1])
             snare_time_diff = abs(strongest_snare[0] - current_time)
-            snare_strength = strongest_snare[1]
             
             # Time falloff
             time_weight = 1.0 - (snare_time_diff / window)
-            
-            # Calculate snare contribution - more conservative
-            snare_value = 0.7 + (snare_strength / avg_snare_strength) * 0.3
-            snare_value = max(0.5, min(0.95, snare_value))
-            
-            snare_contribution = snare_value * time_weight
+            snare_contribution = 1.0 * time_weight  # Fixed snare strength
         
         # Combine contributions
         if kick_contribution > 0 or snare_contribution > 0:
             contribution = max(kick_contribution, snare_contribution)
-            current_value = max(0.5, contribution)
+            current_value = max(min_strength, contribution)
         
         envelope_times.append(current_time)
         envelope_values.append(current_value)
@@ -1199,13 +1195,42 @@ def calculate_light_strength_envelope(segment, resolution_ms=20):
     # Add final point if needed
     if envelope_times[-1] < segment_end:
         envelope_times.append(segment_end)
-        envelope_values.append(0.5)
+        envelope_values.append(min_strength)
+    
+    # NEW CODE: Find ranges where envelope exceeds baseline (0.5)
+    active_ranges = []
+    in_active_range = False
+    range_start = None
+    
+    for i, (time, value) in enumerate(zip(envelope_times, envelope_values)):
+        # Detect transition into active range
+        if value > 0.5 and not in_active_range:
+            in_active_range = True
+            range_start = time
+            
+        # Detect transition out of active range
+        elif (value <= min_strength or i == len(envelope_values) - 1) and in_active_range:
+            in_active_range = False
+            range_end = time
+            
+            # Convert to milliseconds and add to active ranges
+            active_ranges.append({
+                "start_ms": int(range_start * 1000),
+                "end_ms": int(range_end * 1000),
+                "duration_ms": int((range_end - range_start) * 1000),
+                "max_value": max(envelope_values[
+                    envelope_times.index(range_start):envelope_times.index(range_end)+1
+                ])
+            })
+    
+    print(f"  Found {len(active_ranges)} active envelope ranges")
     
     return {
         "times": envelope_times,
         "values": envelope_values,
         "segment_start": segment_start,
-        "segment_end": segment_end
+        "segment_end": segment_end,
+        "active_ranges": active_ranges  # New field with ranges where value > min_strength
     }
 
 # Example usage

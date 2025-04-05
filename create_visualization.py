@@ -491,7 +491,7 @@ def visualize_segments(json_path, audio_path, output_path="output_visualization.
     
 if __name__ == "__main__":
     path = Path(os.getcwd())
-    song = "blue" # enter the song name here
+    song = "close" # enter the song name here
     JSON_PATH = path / f"aidmx/struct/{song}.json"
     AUDIO_PATH = path / f"aidmx/data/songs/{song}.wav"
     OUTPUT_PATH = path / f"aidmx/{song}_visualization.mp4"
