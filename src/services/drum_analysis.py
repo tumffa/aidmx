@@ -140,6 +140,14 @@ def get_onset_parts(segments=None, input=None, sr=None):
     fused_onsets = fuse_close_groups(grouped_onsets)
     fused_onsets = convert_to_start_end_times(fused_onsets)
     return fused_onsets
+
+# Function to convert frame index to time in seconds
+def frame_to_time(frame_idx):
+    return librosa.frames_to_time(frame_idx, sr=22050, hop_length=512)
+
+# Function to convert time to frame index
+def time_to_frame(t):
+    return librosa.time_to_frames(t, sr=22050, hop_length=512)
     
 def analyze_drum_patterns(demix_path, beats=None, segments=None, sr=22050, hop_length=512):
     """
@@ -207,59 +215,23 @@ def analyze_drum_patterns(demix_path, beats=None, segments=None, sr=22050, hop_l
         )
         segments = [{"start": 0, "end": duration, "label": "entire_track"}]
     
-    # Function to convert frame index to time in seconds
-    def frame_to_time(frame_idx):
-        return librosa.frames_to_time(frame_idx, sr=sr, hop_length=hop_length)
-    
-    # Function to convert time to frame index
-    def time_to_frame(t):
-        return librosa.time_to_frames(t, sr=sr, hop_length=hop_length)
-    
     def analyze_component(audio, onset_env, component_name, start_time, end_time, percentile_threshold=75):
         """Analyze a drum component using onset detection directly from audio"""
         # Convert time to frames
         start_frame = max(0, time_to_frame(start_time))
         end_frame = min(len(onset_env), time_to_frame(end_time))
         
-        # Extract segment of interest
-        segment_onset_env = onset_env[start_frame:end_frame]
-        segment_audio = audio[start_frame*hop_length:end_frame*hop_length]
-        
-        if len(segment_onset_env) == 0:
-            return {"error": f"No {component_name} data available in this segment"}
-        
+        onset_times_with_strength = extract_component_hits(
+            audio, onset_env, component_name, start_time, end_time
+        )
+
+        onset_times = [t for t, _ in onset_times_with_strength]
+
         # Check if the segment is very quiet overall compared to the track average
+        segment_audio = audio[start_frame*hop_length:end_frame*hop_length]
         segment_energy = np.mean(np.abs(segment_audio))
         track_energy = np.mean(np.abs(audio))
         ratio_to_average = segment_energy / (track_energy + 1e-10)  # Avoid division by zero
-
-        # Peak Picking
-        onset_frames = librosa.util.peak_pick(
-            segment_onset_env,
-            pre_max=3,
-            post_max=3,
-            pre_avg=3,
-            post_avg=5,
-            delta=0.15,
-            wait=2
-        )
-        
-        # Convert to absolute frame indices
-        onset_frames = onset_frames + start_frame
-        
-        # Create a list of (frame, strength) tuples
-        onset_frames_with_strength = []
-        for frame in onset_frames:
-            if frame < len(onset_env):
-                strength = onset_env[frame]  # Get the strength value at this frame
-                onset_frames_with_strength.append((frame, float(strength)))
-        
-        # Convert frames to times and keep the strength values
-        onset_times_with_strength = [(float(frame_to_time(frame)), strength) 
-                                for frame, strength in onset_frames_with_strength]
-        
-        # Just the times for compatibility with existing code
-        onset_times = [t for t, _ in onset_times_with_strength]
         
         print(f"  {component_name.capitalize()} - Detected {len(onset_times)} hits using onset detection")
         
@@ -272,10 +244,9 @@ def analyze_drum_patterns(demix_path, beats=None, segments=None, sr=22050, hop_l
             "ratio_to_average": float(ratio_to_average),
         }
 
-    # New function to calculate periodicity from beat-matched hits
     def calculate_periodicity_from_matches(matched_hits, start_time, end_time, sr=22050, hop_length=512):
         """
-        Calculate periodicity information from beat-matched hits.
+        Calculate periodicity information from beat-matched hits with improved phase alignment.
         
         Args:
             matched_hits: List of (hit_time, beat_time, strength) tuples
@@ -287,6 +258,8 @@ def analyze_drum_patterns(demix_path, beats=None, segments=None, sr=22050, hop_l
         """
         # Extract hit times (first element of each tuple)
         hit_times = [hit[0] for hit in matched_hits]
+        # Extract associated beat times (second element of each tuple)
+        beat_times = [hit[1] for hit in matched_hits]
         
         if len(hit_times) < 4:
             return {
@@ -295,9 +268,11 @@ def analyze_drum_patterns(demix_path, beats=None, segments=None, sr=22050, hop_l
                 "period_timeframes": [],
                 "tempo_bpm": 0
             }
-        
-        # Sort the hit times
-        hit_times.sort()
+            
+        # Sort the matched hits by time
+        hit_times, beat_times = zip(*sorted(zip(hit_times, beat_times)))
+        hit_times = list(hit_times)
+        beat_times = list(beat_times)
         
         # Calculate inter-onset intervals (IOIs)
         iois = [hit_times[i+1] - hit_times[i] for i in range(len(hit_times)-1)]
@@ -311,7 +286,6 @@ def analyze_drum_patterns(demix_path, beats=None, segments=None, sr=22050, hop_l
             }
             
         # Histogram approach to find the dominant period
-        # Group IOIs into bins to find the most common duration
         min_period = 0.2  # 300 BPM max
         max_period = 2.0  # 30 BPM min
         
@@ -319,8 +293,8 @@ def analyze_drum_patterns(demix_path, beats=None, segments=None, sr=22050, hop_l
         valid_iois = [ioi for ioi in iois if min_period <= ioi <= max_period]
         
         if not valid_iois:
-            # If no valid IOIs in range, use the mean of all IOIs as fallback
-            period_seconds = np.mean(iois)
+            # If no valid IOIs in range, use the median of all IOIs as fallback
+            period_seconds = np.median(iois) if iois else 0
         else:
             # Use histogram to find most common IOI
             hist, bins = np.histogram(valid_iois, bins=20, range=(min_period, max_period))
@@ -328,57 +302,124 @@ def analyze_drum_patterns(demix_path, beats=None, segments=None, sr=22050, hop_l
             period_seconds = (bins[most_common_idx] + bins[most_common_idx+1]) / 2
         
         # Calculate BPM from period
-        tempo_bpm = 60 / period_seconds
+        tempo_bpm = 60 / period_seconds if period_seconds > 0 else 0
         
-        # Find optimal phase alignment
-        # Test different offsets to find the one that minimizes distance to hit times
-        num_test_points = 50
-        best_offset = 0
-        min_total_distance = float('inf')
-        
-        for i in range(num_test_points):
-            test_offset = (i / num_test_points) * period_seconds
-            grid_points = []
+        # ADVANCED PHASE ALIGNMENT: Find optimal phase by minimizing distance to actual hits
+        if hit_times and period_seconds > 0:
+            # Test multiple phase offsets to find the one that best aligns with the actual hits
+            num_offsets = 100  # Test 100 different phase positions
+            best_phase_offset = 0
+            min_total_distance = float('inf')
             
-            # Generate grid points for this offset
-            current_time = start_time + test_offset
+            # Try different offsets throughout one period
+            for i in range(num_offsets):
+                test_offset = (i / num_offsets) * period_seconds
+                total_distance = 0
+                
+                # Generate test timeframes
+                test_timeframes = []
+                current_time = start_time + test_offset
+                while current_time <= end_time:
+                    test_timeframes.append(current_time)
+                    current_time += period_seconds
+                
+                # Calculate total distance from each timeframe to the nearest hit
+                for tf in test_timeframes:
+                    if hit_times:
+                        nearest_distance = min(abs(tf - hit) for hit in hit_times)
+                        total_distance += nearest_distance
+                        
+                # Keep track of the best offset
+                if total_distance < min_total_distance:
+                    min_total_distance = total_distance
+                    best_phase_offset = test_offset
+            
+            # Now use the best phase offset to generate the final timeframes
+            period_timeframes = []
+            current_time = start_time + best_phase_offset
             while current_time <= end_time:
-                grid_points.append(current_time)
-                current_time += period_seconds
-                
-            # Calculate total distance from hits to nearest grid points
-            total_distance = 0
-            for hit_time in hit_times:
-                nearest_distance = min(abs(hit_time - grid_point) for grid_point in grid_points)
-                total_distance += nearest_distance
-                
-            if total_distance < min_total_distance:
-                min_total_distance = total_distance
-                best_offset = test_offset
-        
-        # Generate final grid of period timeframes using best offset
-        period_timeframes = []
-        current_time = start_time + (best_offset % period_seconds)
-        
-        # Adjust first_timeframe to before start_time if needed
-        while current_time > start_time:
-            current_time -= period_seconds
-            
-        # Generate timeframes
-        while current_time <= end_time:
-            if current_time >= start_time:
                 period_timeframes.append(float(current_time))
-            current_time += period_seconds
+                current_time += period_seconds
+            
+            # Calculate alignment quality metrics
+            avg_distance = min_total_distance / len(period_timeframes) if period_timeframes else 0
+            alignment_quality = max(0, 1.0 - (avg_distance / (period_seconds * 0.25)))  # Scale to 0-1
+            
+            print(f"  Calculated periodicity: {period_seconds:.3f}s, {tempo_bpm:.1f} BPM")
+            print(f"  Generated {len(period_timeframes)} optimally-aligned timeframes")
+            print(f"  Phase offset: {best_phase_offset:.3f}s, alignment quality: {alignment_quality:.2f}")
+            
+            return {
+                "pattern_found": True,
+                "period_seconds": float(period_seconds),
+                "tempo_bpm": float(tempo_bpm),
+                "period_timeframes": period_timeframes,
+                "alignment_quality": float(alignment_quality)
+            }
+        else:
+            return {
+                "pattern_found": False,
+                "period_seconds": float(period_seconds) if period_seconds else 0,
+                "tempo_bpm": float(tempo_bpm) if tempo_bpm else 0,
+                "period_timeframes": []
+            }
+    
+    # Check for significant structural change inside segment and divide if necessary
+
+    # Store original segments
+    original_segments = segments.copy() if segments else []
+    
+    # Modified segment processing with BPM change detection
+    processed_segments = []
+    
+    for segment in original_segments:
+        start_time = segment['start']
+        end_time = segment['end']
+        original_label = segment.get('label', 'unnamed')
         
-        print(f"  Calculated periodicity from beat-matches: {period_seconds:.3f}s, {tempo_bpm:.1f} BPM")
-        print(f"  Generated {len(period_timeframes)} phase-aligned timeframes")
+        print(f"\nAnalyzing segment '{original_label}' ({start_time:.2f}s - {end_time:.2f}s)")
         
-        return {
-            "pattern_found": True,
-            "period_seconds": float(period_seconds),
-            "tempo_bpm": float(tempo_bpm),
-            "period_timeframes": period_timeframes
-        }
+        # First just detect hits without full analysis
+        kick_hits = extract_component_hits(kick_audio, kick_onset_env_normalized, "kick", start_time, end_time)
+        snare_hits = extract_component_hits(snare_audio, snare_onset_env_normalized, "snare", start_time, end_time)
+        
+        # Extract just the hit times (without strength)
+        kick_times = [t for t, _ in kick_hits]
+        snare_times = [t for t, _ in snare_hits]
+        
+        # Combine both for better change detection (more data points)
+        all_hits = sorted(kick_times + snare_times)
+        
+        # Detect BPM changes
+        change_points = detect_bpm_changes(all_hits, start_time, end_time)
+        
+        # If no changes detected, keep the original segment
+        if not change_points:
+            processed_segments.append(segment)
+            continue
+            
+        # Split segment at change points
+        subsegment_times = [start_time] + change_points + [end_time]
+        
+        print(f"  Splitting segment into {len(subsegment_times)-1} subsegments due to BPM changes")
+        
+        # Create subsegments
+        for i in range(len(subsegment_times) - 1):
+            subseg_start = subsegment_times[i]
+            subseg_end = subsegment_times[i+1]
+            
+            # Create subsegment with same metadata as parent but marked as subsegment
+            subsegment = segment.copy()
+            subsegment['start'] = subseg_start
+            subsegment['end'] = subseg_end
+            subsegment['label'] = f"{original_label}"
+            subsegment['is_subsegment'] = True
+            subsegment['subsegment_index'] = i
+            
+            processed_segments.append(subsegment)
+    
+    # Replace original segments with processed ones (original or split)
+    segments = processed_segments
         
     for segment in segments:
         start_time = segment['start']
@@ -429,7 +470,22 @@ def analyze_drum_patterns(demix_path, beats=None, segments=None, sr=22050, hop_l
             "kick_ratio_to_average": kick_analysis.get("ratio_to_average", 0),
             "snare_ratio_to_average": snare_analysis.get("ratio_to_average", 0),
         }
+
+        # Find kick/snare hits that define the beat
+        find_beat_defining_hits(segment, beat_kick_matches, beat_snare_matches)
+
+        # Calculate the light strength envelope
+        light_envelope = calculate_light_strength_envelope(segment)
         
+        # Add it to the segment's drum analysis
+        segment["drum_analysis"]["light_strength_envelope"] = light_envelope
+        
+        # Log basic stats about the envelope
+        avg_strength = sum(light_envelope["values"]) / len(light_envelope["values"])
+        max_strength = max(light_envelope["values"])
+        min_strength = min(light_envelope["values"])
+        print(f"  Generated light strength envelope: avg={avg_strength:.2f}, min={min_strength:.2f}, max={max_strength:.2f}")
+
         # Log results for this segment
         label = segment.get('label', f"{segment['start']}-{segment['end']},")
         print(f"Segment '{label}', Start: {segment['start']:.2f}, subsegment: {segment.get('is_subsegment', False)}")
@@ -747,6 +803,410 @@ def match_beats_with_drum_hits(beats, kick_hits, snare_hits, window=0.15,
             beat_snare_matches.append(best_snare_match)
     
     return beat_kick_matches, beat_snare_matches
+
+def detect_bpm_changes(hit_times, start_time, end_time, min_subsection_length=8):
+    """
+    Detect significant changes in rhythmic patterns within a segment.
+    
+    Args:
+        hit_times: List of time points when drum hits occur
+        start_time: Start time of the segment
+        end_time: End time of the segment
+        min_subsection_length: Minimum length (in seconds) for a valid subsection
+        
+    Returns:
+        List of detected change points (time values where BPM changes)
+    """
+    if len(hit_times) < 8:  # Need sufficient hits to detect changes
+        return []
+    
+    # Sort hit times
+    hit_times = sorted(hit_times)
+    
+    # Calculate inter-onset intervals
+    iois = [hit_times[i+1] - hit_times[i] for i in range(len(hit_times)-1)]
+    if not iois:
+        return []
+        
+    # Use a sliding window to detect changes in IOI distribution
+    window_size = min(8, len(iois) // 2)  # Use at least 8 IOIs per window, if available
+    if window_size < 4:  # Not enough data for reliable change detection
+        return []
+        
+    change_points = []
+    
+    # Calculate median IOI for the first window as reference
+    current_window = iois[:window_size]
+    reference_ioi = np.median(current_window)
+    
+    # Slide the window through the IOIs
+    for i in range(1, len(iois) - window_size + 1):
+        window = iois[i:i+window_size]
+        window_median = np.median(window)
+        
+        # Calculate ratio between window median and reference
+        ratio = max(window_median, reference_ioi) / min(window_median, reference_ioi)
+        
+        # If ratio indicates significant change (greater than 15%)
+        # and we're far enough from previous change points
+        if ratio > 1.15:  # 15% change threshold
+            change_time = hit_times[i + window_size // 2]
+            
+            # Check if change point is far enough from segment boundaries
+            min_distance_to_boundary = min(change_time - start_time, end_time - change_time)
+            
+            # Check if change point is far enough from other change points
+            far_from_changes = all(abs(change_time - cp) >= min_subsection_length for cp in change_points)
+            
+            if min_distance_to_boundary >= min_subsection_length and far_from_changes:
+                change_points.append(change_time)
+                # Update reference to detect further changes
+                reference_ioi = window_median
+    
+    print(f"  Detected {len(change_points)} BPM change points within segment: {[f'{cp:.2f}s' for cp in change_points]}")
+    return change_points
+
+def extract_component_hits(audio, onset_env, component_name, start_time, end_time):
+    """Extract hit times for a drum component without full pattern analysis"""
+    # Convert time to frames
+    start_frame = max(0, time_to_frame(start_time))
+    end_frame = min(len(onset_env), time_to_frame(end_time))
+    
+    # Extract segment of interest
+    segment_onset_env = onset_env[start_frame:end_frame]
+    
+    if len(segment_onset_env) == 0:
+        return []
+    
+    # Peak Picking
+    onset_frames = librosa.util.peak_pick(
+        segment_onset_env,
+        pre_max=3,
+        post_max=3,
+        pre_avg=3,
+        post_avg=5,
+        delta=0.10,
+        wait=2
+    )
+    
+    # Convert to absolute frame indices
+    onset_frames = onset_frames + start_frame
+    
+    # Create a list of (frame, strength) tuples
+    onset_frames_with_strength = []
+    for frame in onset_frames:
+        if frame < len(onset_env):
+            strength = onset_env[frame]
+            onset_frames_with_strength.append((frame, float(strength)))
+    
+    # Convert frames to times and keep the strength values
+    onset_times_with_strength = [(float(frame_to_time(frame)), strength) 
+                            for frame, strength in onset_frames_with_strength]
+    
+    return onset_times_with_strength
+
+def find_beat_defining_hits(segment, kick_beat_matches, snare_beat_matches, window=0.5):
+    """
+    For each beat match, check if there's a period timeframe nearby and use it as a defining hit.
+    Also ensure each periodicity timeframe has a corresponding defining hit.
+    
+    Args:
+        segment: Segment dictionary with drum_analysis already computed
+        kick_beat_matches: List of (hit_time, beat_time, strength) tuples for kick
+        snare_beat_matches: List of (hit_time, beat_time, strength) tuples for snare
+        window: Maximum time window to consider a match
+    """
+    if not segment or "drum_analysis" not in segment:
+        return segment
+        
+    drum_analysis = segment["drum_analysis"]
+    
+    # Process kick pattern
+    if "kick" in drum_analysis:
+        kick_analysis = drum_analysis["kick"]
+        period_timeframes = kick_analysis.get("period_timeframes", [])
+        hit_times_with_strength = kick_analysis.get("hit_times_with_strength", [])
+        
+        # Initialize beat defining hits
+        beat_defining_hits = []
+        
+        # For each kick beat match, check if there's a period timeframe nearby
+        # This ensures strong hits that align with the beat are included
+        for hit_time, beat_time, strength in kick_beat_matches:
+            # Check if this hit is close to any period timeframe
+            is_close_to_timeframe = False
+            for tf in period_timeframes:
+                if abs(hit_time - tf) <= window:
+                    is_close_to_timeframe = True
+                    break
+                    
+            # If this hit is close to a period timeframe, add it
+            if is_close_to_timeframe:
+                beat_defining_hits.append((float(hit_time), float(strength)))
+        
+        # Now ensure each period timeframe has a corresponding defining hit
+        # This maintains the complete grid even for timeframes without direct hits
+        covered_timeframes = set()
+        
+        # Mark timeframes that already have a close defining hit
+        for timeframe in period_timeframes:
+            has_close_hit = False
+            for hit_time, strength in beat_defining_hits:
+                if abs(hit_time - timeframe) <= window:
+                    covered_timeframes.add(timeframe)
+                    has_close_hit = True
+                    break
+        
+        # For uncovered timeframes, find the best match or use the timeframe itself
+        for timeframe in period_timeframes:
+            if timeframe in covered_timeframes:
+                continue
+                
+            # Try to find a hit that's close
+            best_match_time = None
+            best_match_strength = 0
+            min_distance = float('inf')
+            
+            # Check kick hits
+            for hit_time, strength in hit_times_with_strength:
+                distance = abs(hit_time - timeframe)
+                if distance < min_distance and distance <= window:
+                    min_distance = distance
+                    best_match_time = hit_time
+                    best_match_strength = strength
+            
+            # If found a match, add it
+            if best_match_time is not None:
+                beat_defining_hits.append((float(best_match_time), float(best_match_strength)))
+            else:
+                # If no match found, use the timeframe itself with medium strength
+                beat_defining_hits.append((float(timeframe), 0.5))
+        
+        # Sort by time for consistency
+        beat_defining_hits.sort(key=lambda x: x[0])
+        
+        # Save the beat defining hits to the kick analysis
+        kick_analysis["beat_defining_hits"] = beat_defining_hits
+    
+    # Similarly process snare pattern using the same approach
+    if "snare" in drum_analysis:
+        snare_analysis = drum_analysis["snare"]
+        period_timeframes = snare_analysis.get("period_timeframes", [])
+        hit_times_with_strength = snare_analysis.get("hit_times_with_strength", [])
+        
+        # Initialize beat defining hits
+        beat_defining_hits = []
+        
+        # For each snare beat match, check if there's a period timeframe nearby
+        for hit_time, beat_time, strength in snare_beat_matches:
+            # Check if this hit is close to any period timeframe
+            is_close_to_timeframe = False
+            for tf in period_timeframes:
+                if abs(hit_time - tf) <= window:
+                    is_close_to_timeframe = True
+                    break
+                    
+            # If this hit is close to a period timeframe, add it
+            if is_close_to_timeframe:
+                beat_defining_hits.append((float(hit_time), float(strength)))
+        
+        # Now ensure each period timeframe has a corresponding defining hit
+        covered_timeframes = set()
+        
+        # Mark timeframes that already have a close defining hit
+        for timeframe in period_timeframes:
+            has_close_hit = False
+            for hit_time, strength in beat_defining_hits:
+                if abs(hit_time - timeframe) <= window:
+                    covered_timeframes.add(timeframe)
+                    has_close_hit = True
+                    break
+        
+        # For uncovered timeframes, find the best match or use the timeframe itself
+        for timeframe in period_timeframes:
+            if timeframe in covered_timeframes:
+                continue
+                
+            # Try to find a hit that's close
+            best_match_time = None
+            best_match_strength = 0
+            min_distance = float('inf')
+            
+            # Check snare hits
+            for hit_time, strength in hit_times_with_strength:
+                distance = abs(hit_time - timeframe)
+                if distance < min_distance and distance <= window:
+                    min_distance = distance
+                    best_match_time = hit_time
+                    best_match_strength = strength
+            
+            # If found a match, add it
+            if best_match_time is not None:
+                beat_defining_hits.append((float(best_match_time), float(best_match_strength)))
+            else:
+                # If no match found, use the timeframe itself with medium strength
+                beat_defining_hits.append((float(timeframe), 0.5))
+        
+        # Sort by time for consistency
+        beat_defining_hits.sort(key=lambda x: x[0])
+        
+        # Save the beat defining hits to the snare analysis
+        snare_analysis["beat_defining_hits"] = beat_defining_hits
+    
+    return segment
+
+def calculate_light_strength_envelope(segment, resolution_ms=20):
+    """
+    Calculate a combined strength envelope from kick and snare beat-defining hits.
+    Only real hits should significantly increase intensity, not phantom grid markers.
+    
+    Args:
+        segment: Segment dictionary containing drum_analysis with beat_defining_hits
+        resolution_ms: Time resolution in milliseconds for the envelope
+    """
+    if not segment or "drum_analysis" not in segment:
+        return {"times": [], "values": [], "segment_start": 0, "segment_end": 0}
+    
+    drum_analysis = segment["drum_analysis"]
+    segment_start = segment["start"]
+    segment_end = segment["end"]
+    
+    # Get kick and snare beat defining hits
+    kick_hits = []
+    kick_original_hits = []
+    if "kick" in drum_analysis:
+        if "beat_defining_hits" in drum_analysis["kick"]:
+            kick_hits = drum_analysis["kick"]["beat_defining_hits"]
+        if "hit_times_with_strength" in drum_analysis["kick"]:
+            kick_original_hits = drum_analysis["kick"]["hit_times_with_strength"]
+    
+    snare_hits = []
+    snare_original_hits = []
+    if "snare" in drum_analysis:
+        if "beat_defining_hits" in drum_analysis["snare"]:
+            snare_hits = drum_analysis["snare"]["beat_defining_hits"]
+        if "hit_times_with_strength" in drum_analysis["snare"]:
+            snare_original_hits = drum_analysis["snare"]["hit_times_with_strength"]
+    
+    # Create sets of actual hit times for fast lookup
+    real_kick_times = {time for time, _ in kick_original_hits}
+    real_snare_times = {time for time, _ in snare_original_hits}
+    
+    # If no hits found, return a flat baseline
+    if not kick_hits and not snare_hits:
+        return {
+            "times": [segment_start, segment_end],
+            "values": [0.5, 0.5],
+            "segment_start": segment_start,
+            "segment_end": segment_end
+        }
+    
+    # Calculate average strengths for real hits only
+    avg_kick_strength = sum(strength for _, strength in kick_original_hits) / max(1, len(kick_original_hits)) if kick_original_hits else 0.5
+    avg_snare_strength = sum(strength for _, strength in snare_original_hits) / max(1, len(snare_original_hits)) if snare_original_hits else 0.5
+    
+    # Filter defining hits to mark phantom hits
+    filtered_hits = []
+    for time, strength, is_snare in [(t, s, False) for t, s in kick_hits] + [(t, s, True) for t, s in snare_hits]:
+        # Check if this is a real hit or a phantom grid marker
+        is_real_hit = (not is_snare and abs(min([abs(time - rt) for rt in real_kick_times], default=999)) < 0.05) or \
+                      (is_snare and abs(min([abs(time - rt) for rt in real_snare_times], default=999)) < 0.05)
+        
+        # Add with flag for real/phantom status
+        filtered_hits.append((time, strength, is_snare, is_real_hit))
+    
+    # Sort by time
+    filtered_hits.sort(key=lambda x: x[0])
+    
+    # Generate envelope points
+    resolution_sec = resolution_ms / 1000
+    envelope_times = []
+    envelope_values = []
+    
+    # Start with baseline at segment start
+    current_time = segment_start
+    envelope_times.append(current_time)
+    envelope_values.append(0.5)  # Baseline strength
+    
+    # Add points for each time step
+    while current_time <= segment_end:
+        current_value = 0.5  # Baseline
+        
+        # Find nearby hits (within window)
+        window = 0.1  # 100ms window for hit influence
+        nearby_kicks = []
+        nearby_snares = []
+        
+        for hit_time, strength, is_snare, is_real_hit in filtered_hits:
+            if abs(hit_time - current_time) <= window:
+                # Only use real hits for significant strength increases
+                if is_real_hit:
+                    if not is_snare:  # Kick
+                        nearby_kicks.append((hit_time, strength))
+                    else:  # Snare
+                        nearby_snares.append((hit_time, strength))
+                # For phantom hits, only allow very small contribution
+                elif abs(hit_time - current_time) < 0.02:  # Very close to grid point
+                    if not is_snare:  # Kick
+                        nearby_kicks.append((hit_time, strength * 0.0))  # Reduced impact
+                    else:  # Snare
+                        nearby_snares.append((hit_time, strength * 0.0))  # Reduced impact
+        
+        # Calculate strength from nearby hits
+        # Process kicks first
+        kick_contribution = 0
+        if nearby_kicks:
+            strongest_kick = max(nearby_kicks, key=lambda x: x[1])
+            kick_time_diff = abs(strongest_kick[0] - current_time)
+            kick_strength = strongest_kick[1]
+            
+            # Time falloff - closer hits have more influence
+            time_weight = 1.0 - (kick_time_diff / window)
+            
+            # Calculate kick contribution
+            kick_value = 0.7 + (kick_strength - avg_kick_strength * 0.5) * 0.3
+            kick_value = max(0.5, min(0.85, kick_value))  # More conservative range
+            
+            kick_contribution = kick_value * time_weight
+        
+        # Process snares
+        snare_contribution = 0
+        if nearby_snares:
+            strongest_snare = max(nearby_snares, key=lambda x: x[1])
+            snare_time_diff = abs(strongest_snare[0] - current_time)
+            snare_strength = strongest_snare[1]
+            
+            # Time falloff
+            time_weight = 1.0 - (snare_time_diff / window)
+            
+            # Calculate snare contribution - more conservative
+            snare_value = 0.7 + (snare_strength / avg_snare_strength) * 0.3
+            snare_value = max(0.5, min(0.95, snare_value))
+            
+            snare_contribution = snare_value * time_weight
+        
+        # Combine contributions
+        if kick_contribution > 0 or snare_contribution > 0:
+            contribution = max(kick_contribution, snare_contribution)
+            current_value = max(0.5, contribution)
+        
+        envelope_times.append(current_time)
+        envelope_values.append(current_value)
+        
+        # Move to next time step
+        current_time += resolution_sec
+    
+    # Add final point if needed
+    if envelope_times[-1] < segment_end:
+        envelope_times.append(segment_end)
+        envelope_values.append(0.5)
+    
+    return {
+        "times": envelope_times,
+        "values": envelope_values,
+        "segment_start": segment_start,
+        "segment_end": segment_end
+    }
 
 # Example usage
 if __name__ == "__main__":

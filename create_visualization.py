@@ -59,8 +59,14 @@ def visualize_segments(json_path, audio_path, output_path="output_visualization.
     beat_color = (255, 165, 0)  # Orange for beat markers (BGR)
     beat_match_color = (255, 255, 255)  # White outline for beat-matched hits
     beat_match_outline_thickness = 2  # Thickness of the outline
+    stront_hit_color = (255, 140, 0)
     kick_period_color = (128, 0, 255)  # Purple for kick period markers (BGR)
     snare_period_color = (0, 255, 255)  # Yellow for snare period markers (BGR)
+    envelope_height = 150  # Height of the envelope graph area
+    envelope_baseline_y = height - 200  # Position from bottom for the baseline
+    envelope_color_min = (50, 50, 180)  # Orange-ish color for minimum strength
+    envelope_color_max = (50, 230, 255)  # Yellow color for maximum strength
+    envelope_line_thickness = 2
     
     # Create frames for each time point
     print(f"Generating {total_frames} frames...")
@@ -103,6 +109,17 @@ def visualize_segments(json_path, audio_path, output_path="output_visualization.
                 # BPM information
                 kick_tempo = drum_data.get("kick", {}).get("tempo_bpm", 0)
                 snare_tempo = drum_data.get("snare", {}).get("tempo_bpm", 0)
+
+                # Extract beat match timeframes
+                kick_strong_hits = []
+                if "kick" in drum_data and "beat_defining_hits" in drum_data["kick"]:
+                    # Extract just the timeframes from beat_matches
+                    kick_strong_hits = [match[0] for match in drum_data["kick"]["beat_defining_hits"]]
+                
+                snare_strong_hits = []
+                if "snare" in drum_data and "beat_defining_hits" in drum_data["snare"]:
+                    # Extract just the timeframes from beat_matches
+                    snare_strong_hits = [match[0] for match in drum_data["snare"]["beat_defining_hits"]]
 
                 # Extract beat match timeframes
                 kick_beat_matches = []
@@ -157,6 +174,13 @@ def visualize_segments(json_path, audio_path, output_path="output_visualization.
                                                  (x_pos - bar_width//2, height//2 + 10), 
                                                  (x_pos + bar_width//2, height//2 + 10 + bar_height), 
                                                  beat_match_color, beat_match_outline_thickness)
+                                    
+                                # Add orange outline if this kick has a strong hit
+                                if time in kick_strong_hits:
+                                    cv2.rectangle(frame, 
+                                                 (x_pos - bar_width//2, height//2 + 10), 
+                                                 (x_pos + bar_width//2, height//2 + 10 + bar_height), 
+                                                 stront_hit_color, beat_match_outline_thickness * 2)
                 
                 # Render snare hits
                 if "snare" in drum_data and "hit_times_with_strength" in drum_data["snare"]:
@@ -183,6 +207,13 @@ def visualize_segments(json_path, audio_path, output_path="output_visualization.
                                                  (x_pos - bar_width//2, height//2 - 10), 
                                                  (x_pos + bar_width//2, height//2 - 10 - bar_height), 
                                                  beat_match_color, beat_match_outline_thickness)
+                                    
+                                # Add orange outline if this snare has a strong hit
+                                if time in snare_strong_hits:
+                                    cv2.rectangle(frame, 
+                                                 (x_pos - bar_width//2, height//2 - 10), 
+                                                 (x_pos + bar_width//2, height//2 - 10 - bar_height), 
+                                                 stront_hit_color, beat_match_outline_thickness * 3)
                                     
                 # Render kick period timeframe indicators
                 for time in kick_period_timeframes:
@@ -217,6 +248,99 @@ def visualize_segments(json_path, audio_path, output_path="output_visualization.
                             ], np.int32)
                             pts = pts.reshape((-1, 1, 2))
                             cv2.fillPoly(frame, [pts], snare_period_color)
+
+                if "light_strength_envelope" in drum_data:
+                    envelope_data = drum_data["light_strength_envelope"]
+                    envelope_times = envelope_data.get("times", [])
+                    envelope_values = envelope_data.get("values", [])
+                    
+                    if envelope_times and envelope_values:
+                        # Draw envelope area border
+                        cv2.rectangle(frame, 
+                                    (50, envelope_baseline_y - envelope_height), 
+                                    (width - 50, envelope_baseline_y + 10), 
+                                    (80, 80, 80), 1)
+                        
+                        # Add labels
+                        cv2.putText(frame, "Light Strength", (55, envelope_baseline_y - envelope_height + 20), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+                        
+                        # Draw baseline at 0.5 strength
+                        baseline_y = int(envelope_baseline_y - 0.5 * envelope_height)
+                        cv2.line(frame, (50, baseline_y), (width - 50, baseline_y), (70, 70, 70), 1)
+                        
+                        # Label the baseline
+                        cv2.putText(frame, "0.5", (35, baseline_y + 5), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
+                        
+                        # Draw min and max lines
+                        cv2.line(frame, (50, envelope_baseline_y), (width - 50, envelope_baseline_y), (70, 70, 70), 1)
+                        cv2.putText(frame, "0.0", (35, envelope_baseline_y + 5), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
+                        
+                        min_y = int(envelope_baseline_y - envelope_height)
+                        cv2.line(frame, (50, min_y), (width - 50, min_y), (70, 70, 70), 1)
+                        cv2.putText(frame, "1.0", (35, min_y + 5), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
+                        
+                        # Find the values visible in the current window
+                        visible_points = []
+                        for i, t in enumerate(envelope_times):
+                            if current_time - 2 <= t <= current_time + 2 and i < len(envelope_values):
+                                # Calculate x position based on time
+                                x_pos = int(width/2 + (t - current_time) * width/4)
+                                if 0 <= x_pos < width:
+                                    # Calculate y position based on strength value
+                                    strength = envelope_values[i]
+                                    y_pos = int(envelope_baseline_y - strength * envelope_height)
+                                    visible_points.append((x_pos, y_pos, strength))
+                        
+                        # Draw the envelope curve as a continuous line
+                        if len(visible_points) > 1:
+                            for i in range(len(visible_points) - 1):
+                                x1, y1, s1 = visible_points[i]
+                                x2, y2, s2 = visible_points[i+1]
+                                
+                                # Interpolate color based on average strength
+                                avg_strength = (s1 + s2) / 2
+                                r = int(envelope_color_min[0] + (envelope_color_max[0] - envelope_color_min[0]) * avg_strength)
+                                g = int(envelope_color_min[1] + (envelope_color_max[1] - envelope_color_min[1]) * avg_strength)
+                                b = int(envelope_color_min[2] + (envelope_color_max[2] - envelope_color_min[2]) * avg_strength)
+                                color = (b, g, r)  # BGR format
+                                
+                                # Draw line segment
+                                cv2.line(frame, (x1, y1), (x2, y2), color, envelope_line_thickness)
+                        
+                        # Fill area under the curve
+                        if len(visible_points) > 1:
+                            # Create polygon points
+                            polygon_points = []
+                            
+                            # Add first point at the bottom
+                            first_x, _, _ = visible_points[0]
+                            polygon_points.append((first_x, envelope_baseline_y))
+                            
+                            # Add all visible points
+                            for x, y, _ in visible_points:
+                                polygon_points.append((x, y))
+                            
+                            # Add last point at the bottom
+                            last_x, _, _ = visible_points[-1]
+                            polygon_points.append((last_x, envelope_baseline_y))
+                            
+                            # Convert to numpy array for fillPoly
+                            polygon_points = np.array(polygon_points, np.int32)
+                            polygon_points = polygon_points.reshape((-1, 1, 2))
+                            
+                            # Create semi-transparent overlay for the filled area
+                            overlay = frame.copy()
+                            cv2.fillPoly(overlay, [polygon_points], (100, 100, 200))
+                            cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
+                        
+                        # Add current indicator
+                        now_x = width // 2
+                        cv2.line(frame, (now_x, envelope_baseline_y + 10), 
+                                (now_x, envelope_baseline_y - envelope_height), (255, 200, 50), 2)
             
             # Draw center line
             cv2.line(frame, (0, height//2), (width, height//2), (50, 50, 50), 2)
@@ -247,7 +371,7 @@ def visualize_segments(json_path, audio_path, output_path="output_visualization.
             cv2.rectangle(frame, (legend_x, beat_match_legend_y), (legend_x + 20, beat_match_legend_y + 20), snare_color, -1)
             cv2.rectangle(frame, (legend_x, beat_match_legend_y), (legend_x + 20, beat_match_legend_y + 20), 
                          beat_match_color, beat_match_outline_thickness)
-            cv2.putText(frame, "Beat Match", (legend_x + 30, beat_match_legend_y + 15), 
+            cv2.putText(frame, "Strong Hit", (legend_x + 30, beat_match_legend_y + 15), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
             
             # Kick period marker legend
@@ -367,7 +491,7 @@ def visualize_segments(json_path, audio_path, output_path="output_visualization.
     
 if __name__ == "__main__":
     path = Path(os.getcwd())
-    song = "lostinstatic" # enter the song name here
+    song = "blue" # enter the song name here
     JSON_PATH = path / f"aidmx/struct/{song}.json"
     AUDIO_PATH = path / f"aidmx/data/songs/{song}.wav"
     OUTPUT_PATH = path / f"aidmx/{song}_visualization.mp4"
