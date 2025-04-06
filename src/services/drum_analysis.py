@@ -149,7 +149,7 @@ def frame_to_time(frame_idx):
 def time_to_frame(t):
     return librosa.time_to_frames(t, sr=22050, hop_length=512)
     
-def analyze_drum_patterns(demix_path, beats=None, segments=None, sr=22050, hop_length=512):
+def analyze_drum_patterns(demix_path, beats=None, segments=None, split_segments=False, sr=22050, hop_length=512):
     """
     Use autocorrelation to find rhythmic patterns in kick and snare hits for each segment.
     
@@ -373,6 +373,10 @@ def analyze_drum_patterns(demix_path, beats=None, segments=None, sr=22050, hop_l
     processed_segments = []
     
     for segment in original_segments:
+        # Choose whether to split segments based on BPM changes
+        if not split_segments:
+            processed_segments.append(segment)
+            continue
         start_time = segment['start']
         end_time = segment['end']
         original_label = segment.get('label', 'unnamed')

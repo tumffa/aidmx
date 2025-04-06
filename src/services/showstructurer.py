@@ -34,13 +34,15 @@ class ShowStructurer:
                 dimmer_channel = fixture["dimmer"]
                 self.fixture_dimmer_map[fixture_id] = dimmer_channel
 
-        self.wait_adjustment = 0.08  # Adjust wait time to help with lag
+        self.dimmer_update_fq = 15 # ms
+        self.wait_adjustment = 0.06  # Adjust wait time to help with lag
         self.pause_wait_adjustment = 0.02  # Adjust wait time to help with lag
+        self.command_counter_multi = 4 # Pattern wait times are adjusted by dimmer commands x multi
 
     def adjusted_wait(self, time, is_pause=False):
         if is_pause:
-            return time - max(2, int(math.floor(time * self.pause_wait_adjustment)))
-        return time - max(2, int(math.floor(time * self.wait_adjustment)))
+            return time - max(1, int(math.floor(time * self.pause_wait_adjustment)))
+        return time - max(1, int(math.floor(time * self.wait_adjustment)))
 
     def get_songdata(self, name):
         struct = self.dm.get_struct_data(name)
@@ -193,7 +195,7 @@ class ShowStructurer:
         total_steps = int(16 * steps_per_beat)  # 16 beats for full cycle
         
         # Fixed wait time
-        wait = 15  # milliseconds
+        wait = self.dimmer_update_fq
         
         # Calculate how much to increment dimmer per step
         step_size = 50.0 / (total_steps / 4)  # Divide by 4 to complete cycle in 1/4 of total time
@@ -675,7 +677,6 @@ class ShowStructurer:
             group2 = self.universe["flood"]
         elif "strobe" in self.universe:
             group2 = self.universe["strobe"]
-        time = length
         temp = []
         # for fixture in group2.values():
         #     temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 100, f"Dimmer off"))
@@ -900,7 +901,7 @@ class ShowStructurer:
         current_time_sec = current_time_ms / 1000.0
         
         # Update frequency for dimmer scaling during long waits (in ms)
-        update_frequency_ms = 15
+        update_frequency_ms = self.dimmer_update_fq
         
         is_slowflash = False
         is_pause = False
@@ -958,10 +959,9 @@ class ShowStructurer:
                 light_strength_envelope and
                 fixture_dimmers and
                 seperate_dimmer and
-                not is_slowflash
-                and pattern_started
-                and not in_strobe_range
-                and not is_pause
+                pattern_started and 
+                not in_strobe_range and 
+                not is_pause
             )
 
             found_updates = False
@@ -969,22 +969,16 @@ class ShowStructurer:
             if dimmer_condition:
                 active_ranges = light_strength_envelope.get("active_ranges", [])
                 # Add dynamic dimmer updates during this wait period
-                found_updates, remaining_wait = self._add_dynamic_dimmer_updates(
+                found_updates= self._add_dynamic_dimmer_updates(
                     segment, segment_dimmers, fixture_dimmers, 
                     wait_time, current_time_ms, update_frequency_ms, 
                     envelope_function=envelope_function,
                     active_ranges=active_ranges
                 )
 
-            if found_updates:
-                qlc_wait = remaining_wait
-            else:
-                qlc_wait = wait_time
-            if pattern_started:
-                qlc_wait = self.adjusted_wait(wait_time, is_pause)
-            segment.append(self._wait(qlc_wait, f"Wait for {q[0]} Pattern started: {pattern_started} is pause: {is_pause}"))
+            segment.append(self._wait(wait_time, f"Wait for {q[0]} Pattern started: {pattern_started} is pause: {is_pause}"))
             if seperate_dimmer and not found_updates:
-                segment_dimmers.append(self._wait(qlc_wait, f"First Wait for {q[0]} (dimmer), pattern started: {pattern_started}"))
+                segment_dimmers.append(self._wait(wait_time, f"First Wait for {q[0]} (dimmer), pattern started: {pattern_started}"))
             pattern_started = True
             
             current_time_ms += wait_time
@@ -1030,12 +1024,8 @@ class ShowStructurer:
                                 scaled_value = original_value
                             
                             # Create new command with scaled value
-                            dimmer_command = f"setfixture:{fixture_id} ch:{channel} val:{scaled_value} "
-                            if "//" in command:
-                                comment = command.split("//")[1]
-                                dimmer_command += f"//{comment} (scaled from {original_value})"
-                            else:
-                                dimmer_command += f"//Scaled by envelope: {strength:.2f}"
+                            dimmer_command = self._setfixture(fixture_id, channel, scaled_value,
+                                                                f"Scaled value {scaled_value} from {original_value}")
                                 
                             # Add to dimmer segment
                             if not in_strobe_range:
@@ -1048,12 +1038,11 @@ class ShowStructurer:
                             segment.append(command)
 
             if in_strobe_range:
-                qlc_wait = (current_strobe_range_end_sec - current_time_sec) * 1000
-                if qlc_wait > 0:
-                    qlc_wait = self.adjusted_wait(qlc_wait)
-                    segment.append(self._wait(qlc_wait, f"Wait for strobe range"))
+                wait_time = (current_strobe_range_end_sec - current_time_sec) * 1000
+                if wait_time > 0:
+                    segment.append(self._wait(wait_time, f"Wait for strobe range"))
                     if seperate_dimmer:
-                        segment_dimmers.append(self._wait(qlc_wait, f"Wait for strobe range (dimmer)"))
+                        segment_dimmers.append(self._wait(wait_time, f"Wait for strobe range (dimmer)"))
                 for fixture_id in fixture_dimmers:
                     for channel, value in fixture_dimmers[fixture_id].items():
                         # Check if dimmer
@@ -1062,19 +1051,15 @@ class ShowStructurer:
                             strength = envelope_function(current_time_sec)
                             scaled_value = int(value * strength)
                             
-                            # Create new command with scaled value
-                            dimmer_command = f"setfixture:{fixture_id} ch:{channel} val:{scaled_value} "
-                            if "//" in command:
-                                comment = command.split("//")[1]
-                                dimmer_command += f"//{comment} (scaled from {value})"
-                            else:
-                                dimmer_command += f"//Scaled by envelope: {strength:.2f}"
+                            dimmer_command = self._setfixture(fixture_id, channel, scaled_value,
+                                                              f"Scaled value {scaled_value} from {value}")
                                 
                             # Add to dimmer segment
                             segment_dimmers.append(dimmer_command)
                         else:
-                            # Non-dimmer command
-                            segment.append(f"setfixture:{fixture_id} ch:{channel} val:{value}")
+                            command = self._setfixture(fixture_id, channel, value, 
+                                                       f"Set fixture {fixture_id} channel {channel} to {value}")
+                            segment.append(command)
 
             # Get next wait period
             wait = queue.dequeue()
@@ -1100,8 +1085,6 @@ class ShowStructurer:
             envelope_function: Function that returns envelope strength at given time
             active_ranges: List of active envelope ranges with start_ms and end_ms
         """
-        # Add wait to main segment (no dynamic updates needed)
-        segment.append(self._wait(wait_time, f"Wait for {wait_time}ms"))
     
         # Use active ranges for precise updates
         wait_end_ms = current_time_ms + wait_time
@@ -1113,11 +1096,10 @@ class ShowStructurer:
         ]
         
         if not relevant_ranges:
-            return False, wait_time
+            return False
         
         # Sort ranges by start time
         relevant_ranges.sort(key=lambda r: r['start_ms'])
-        segment_dimmers.append(f"comment:Using {len(relevant_ranges)} active ranges")
         
         # Process each range
         remaining_wait = wait_time
@@ -1129,7 +1111,7 @@ class ShowStructurer:
                 wait_to_range = active_range['start_ms'] - update_time_ms
                 if wait_to_range > 0:
                     # Wait until the start of this active range
-                    segment_dimmers.append(self._wait(wait_to_range, f"Wait until range at {active_range['start_ms']/1000}s"))
+                    segment_dimmers.append(self._wait(self.adjusted_wait(wait_to_range), f"Wait until range at {active_range['start_ms']/1000}s"))
                     update_time_ms += wait_to_range
                     remaining_wait -= wait_to_range
                     
@@ -1144,7 +1126,7 @@ class ShowStructurer:
             range_time_remaining = time_in_range
             while range_time_remaining > 0:
                 update_chunk = min(update_frequency_ms, range_time_remaining)
-                segment_dimmers.append(self._wait(update_chunk, f"Update in active range {active_range['max_value']:.2f}"))
+                segment_dimmers.append(self._wait(self.adjusted_wait(update_chunk), f"Update in active range {active_range['max_value']:.2f}"))
                 update_time_ms += update_chunk
                 
                 strength = envelope_function(update_time_ms / 1000.0)
@@ -1153,7 +1135,8 @@ class ShowStructurer:
                     for channel, value in info.items():
                         if channel == self.fixture_dimmer_map.get(fixture_id, None):
                             scaled_value = int(value * strength)
-                            dimmer_command = f"setfixture:{fixture_id} ch:{channel} val:{scaled_value} "
+                            dimmer_command = self._setfixture(fixture_id, channel, scaled_value, 
+                                                              f"Scaled value {scaled_value} from {value}")
                             segment_dimmers.append(dimmer_command)
                 
                 range_time_remaining -= update_chunk
@@ -1173,15 +1156,15 @@ class ShowStructurer:
                 wait_between_ranges = min(wait_between_ranges, remaining_wait)
                 
                 if wait_between_ranges > 0:
-                    segment_dimmers.append(self._wait(wait_between_ranges, f"Wait between ranges"))
+                    segment_dimmers.append(self._wait(self.adjusted_wait(wait_between_ranges), f"Wait between ranges"))
                     update_time_ms += wait_between_ranges
                     remaining_wait -= wait_between_ranges
         
         # If we have remaining wait time after all ranges, add final wait
         if remaining_wait > 0:
-            segment_dimmers.append(self._wait(self.adjusted_wait(remaining_wait), f"Final wait after ranges"))
+            segment_dimmers.append(self._wait(remaining_wait, f"Finished, wait for {remaining_wait}ms"))
 
-        return True, remaining_wait
+        return True
 
     def generate_show(self, name, qxw, strobes=True):
         # delay for powershell command
@@ -1233,7 +1216,6 @@ class ShowStructurer:
 
             for section in sections:
                 if segments[i]["start"] == section["seg_start"]:
-                    print("found")
                     found = True
                     length = (segments[i]["end"] - segments[i]["start"])*1000
                     types = ["alternate", "side_to_side"]
@@ -1259,6 +1241,7 @@ class ShowStructurer:
                                 if "abovewash" in self.universe:
                                     queues.append(self.alternate_flood(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
                                 lastchaser = "FastPulse"
+                        print(f"Print added energetic {lastchaser} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
                     else:
                         type = random.choice(types)
                         while type == last_choice:
@@ -1270,11 +1253,12 @@ class ShowStructurer:
                             queues.append(self.alternate(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
                         else:
                             queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
+                        print(f"Print added normal {last_choice} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
                     break
 
             if found == False:
                 length = (segments[i]["end"] - segments[i]["start"])*1000
-                queues.append(self.idle(name, show=show, length=length, start=start_time, queuename=f"idle{i}"))
+                # queues.append(self.idle(name, show=show, length=length, start=start_time, queuename=f"idle{i}"))
                 if segments[i-1]["label"] == segments[i]["label"]:
                     if lastidle == "Pulse" and "abovewash" in self.universe:
                         queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
@@ -1289,6 +1273,7 @@ class ShowStructurer:
                     elif "abovewash" in self.universe:
                         queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
                         lastidle = "Pulse"
+                print(f"Print added idle {lastidle} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
 
             end_time = segments[i]["end"]*1000 + delay
             light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]
