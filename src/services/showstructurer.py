@@ -35,9 +35,8 @@ class ShowStructurer:
                 self.fixture_dimmer_map[fixture_id] = dimmer_channel
 
         self.dimmer_update_fq = 15 # ms
-        self.wait_adjustment = 0.06  # Adjust wait time to help with lag
+        self.wait_adjustment = 0.05  # Adjust wait time to help with lag
         self.pause_wait_adjustment = 0.02  # Adjust wait time to help with lag
-        self.command_counter_multi = 4 # Pattern wait times are adjusted by dimmer commands x multi
 
     def adjusted_wait(self, time, is_pause=False):
         if is_pause:
@@ -75,6 +74,7 @@ class ShowStructurer:
         segment_end = light_strength_envelope.get("segment_end", 0)
         
         if not env_times or not env_values:
+            print("Warning: Empty envelope times or values.")
             return lambda t: 1.0
         
         # Create interpolation function (linear interpolation)
@@ -87,11 +87,6 @@ class ShowStructurer:
         
         # Return a closure function that handles the interpolation
         def envelope_function(t):
-            # Handle out-of-segment values
-            if t < segment_start or t > segment_end:
-                return 0.5  # Baseline strength
-                
-            # Use interpolation for values within range
             return float(interp_func(t))
             
         return envelope_function
@@ -529,6 +524,7 @@ class ShowStructurer:
             for fixture in group.values():
                 color_commands = self.calculate_colors(fixture, color1)
                 temp += color_commands
+                temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
                 temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer2, f"Dimmer reset"))
             color_commands = self.calculate_colors(group[str(i)], color2)
             temp.append(self._setfixture(group[str(i)]["id"], group[str(i)]["dimmer"], dimmer1, "Dimmer off"))
@@ -768,7 +764,7 @@ class ShowStructurer:
         result["queue"] = queue
         return result
     
-    def randomstrobe(self, name, show, length=30000.0, start=0, queuename="strobe0", strobecolor="white", waittime=50):
+    def randomstrobe(self, name, show, length=30000.0, start=0, queuename="strobe0", strobecolor="white", light_selection_period=50):
         result = {}
         strobe_queue = Queue()
         result["name"] = queuename
@@ -792,37 +788,77 @@ class ShowStructurer:
             fixtures.append(group.values())
             for fixture in group.values():
                 fixturedimmers[fixture["id"]] = 255
+
+        # Initialize dimmers 0, shutters closed and colours
+        reset = []
+        for set in fixtures:
+            for fixture in set:
+                reset.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
+                reset.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
+                colors = self.calculate_colors(fixture, "white")
+                reset += colors
+        strobe_queue.enqueue(reset)
+        strobe_queue.enqueue(0)
+        
+        update_period = 10  # ms
+        
         while time > 1:
-            for set in fixtures:
-                if strobecolor == "random":
+            # Select a new light and color every light_selection_period ms
+            if strobecolor == "random":
+                color = random.choice(colorspectrum)
+                while color == last_color:
                     color = random.choice(colorspectrum)
-                    while color == last_color:
-                        color = random.choice(colorspectrum)
-                    last_color = color
+                last_color = color
+                
+            # Choose fixture numbers for each set
+            active_fixtures = []
+            for set_index, set in enumerate(fixtures):
                 number = random.randint(0, len(set)-1)
-                while number == indexes[fixtures.index(set)]:
+                while number == indexes[set_index]:
                     number = random.randint(0, len(set)-1)
+                indexes[set_index] = number
+                active_fixtures.append(number)
+            
+            # Calculate how many update cycles we need in this light selection period
+            cycles = min(int(light_selection_period / update_period), int(time / update_period))
+            remaining_time = light_selection_period
+            
+            # Run multiple update cycles with the same active fixture
+            for _ in range(cycles):
                 temp = []
-                j = 0
-                for fixture in set:
-                    if j == number:
-                        colors = self.calculate_colors(fixture, color)
-                        temp += colors
-                        temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"Dimmer on"))
-                        temp.append(self._setfixture(fixture["id"], fixture["strobe"], fixture["nicestrobe"], f"Strobe on"))
-                        fixturedimmers[fixture["id"]] = 255
-                    elif fixturedimmers[fixture["id"]] > 0:
-                        temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
-                        fixturedimmers[fixture["id"]] = 0
-                    j += 1
-                indexes[fixtures.index(set)] = number
-                wait = waittime
-                if time - wait < 0:
+                for set_index, set in enumerate(fixtures):
+                    j = 0
+                    for fixture in set:
+                        if j == active_fixtures[set_index]:
+                            colors = self.calculate_colors(fixture, color)
+                            temp += colors
+                            temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"Dimmer on"))
+                            temp.append(self._setfixture(fixture["id"], fixture["strobe"], fixture["nicestrobe"], f"Strobe on"))
+                            fixturedimmers[fixture["id"]] = 255
+                        elif fixturedimmers[fixture["id"]] > 0:
+                            temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
+                            fixturedimmers[fixture["id"]] = 0
+                        j += 1
+                
+                # Use the shorter update period for more frequent updates
+                wait = update_period
+                if time < wait:
                     wait = time
+                
+                strobe_queue.enqueue(temp)
+                strobe_queue.enqueue(wait)
+                
                 time -= wait
-                if time > 1:
-                    strobe_queue.enqueue(temp)
-                    strobe_queue.enqueue(wait)
+                remaining_time -= wait
+                
+                if time <= 1:
+                    break
+                    
+            # If we still have time but didn't use the full light_selection_period,
+            # add a wait for the remaining time
+            if time > 1 and remaining_time > 0:
+                time -= remaining_time
+        
         result["queue"] = strobe_queue
         return result
                 
@@ -866,6 +902,56 @@ class ShowStructurer:
             else:
                 result["queue"] = blind_queue
                 return result
+            
+    def simple_color(self, name, show, dimmer=255, color="red", length=30000.0, start=0, queuename="colorchaser0"):
+        """
+        Creates a static color effect that sets all lights to the specified color and dimmer
+        and maintains that state for the entire duration.
+        
+        Args:
+            name: Show name
+            show: Show object
+            dimmer: Dimmer value for all fixtures (default 255 - full)
+            color: Color to set for all fixtures (default "red")
+            length: Length in milliseconds
+            start: Start time in milliseconds
+            queuename: Name for the queue
+        
+        Returns:
+            Dictionary with queue and name
+        """
+        result = {}
+        color_queue = Queue()
+        result["name"] = queuename
+        color_queue.enqueue(start)
+        self.shows[name] = show
+        
+        # Use both abovewash and strobe fixtures if available
+        group = {}
+        if "abovewash" in self.universe:
+            group.update(self.universe["abovewash"])
+        if "strobe" in self.universe:
+            for key, value in self.universe["strobe"].items():
+                if key not in group:
+                    group[key] = value
+        
+        # Commands to set color and dimmer
+        temp = []
+        for fixture in group.values():
+            # Set the color
+            color_commands = self.calculate_colors(fixture, color)
+            temp += color_commands
+            
+            # Open shutters and set dimmer to full
+            temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
+            temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer, f"Full dimmer"))
+        
+        # Add commands and wait for the entire duration
+        color_queue.enqueue(temp)
+        color_queue.enqueue(length)
+            
+        result["queue"] = color_queue
+        return result
 
     def combine(self, queues, end_time=None, seperate_dimmer=True, light_strength_envelope=None, strobe_ranges=None):
         """
@@ -882,7 +968,7 @@ class ShowStructurer:
             Tuple of (main_segment, dimmer_segment)
         """
         if light_strength_envelope:
-            envelope_function =  envelope_function = self._light_strength_envelope_function(light_strength_envelope)
+            envelope_function = self._light_strength_envelope_function(light_strength_envelope)
         else:
             envelope_function = lambda t: 1.0  # No scaling if no envelope is provided
         # Main pattern commands (excluding dimmer controls)
@@ -900,7 +986,7 @@ class ShowStructurer:
         current_time_ms = 0
         current_time_sec = current_time_ms / 1000.0
         
-        # Update frequency for dimmer scaling during long waits (in ms)
+        # Update frequency for dimmer scaling during frequent updates
         update_frequency_ms = self.dimmer_update_fq
         
         is_slowflash = False
@@ -942,16 +1028,58 @@ class ShowStructurer:
             queue = command_queues[q[0]]
             wait_time = q[1]
 
-            # Check if current time in sec is in a strobe range
-            # during this time commands are not executed
-            # after strobe values are set back to saved state
+            if not pattern_started:
+                wait_time -= 1
+                segment.append(self._wait(wait_time, f"Initial wait of {wait_time + 1} - 1 ms"))
+                if seperate_dimmer:
+                    segment_dimmers.append(self._wait(wait_time, f"Initial wait of {wait_time + 1} - 1 ms (dimmer)"))
+                for name in times:
+                    times[name] -= wait_time # reduce each queue wait to 1
+                pattern_started = True
+                continue
+
+            entering_strobe_range = False
             in_strobe_range = False
-            if strobe_ranges and not is_pause:
+            exiting_strobe_range = False
+
+            # Check if we are in a strobe range
+            if strobe_ranges:
+                current_time_sec = current_time_ms / 1000.0
+                end_time_sec = current_time_sec + wait_time /1000.0
+                
                 for strobe_range in strobe_ranges:
                     if strobe_range[0] <= current_time_sec <= strobe_range[1]:
                         in_strobe_range = True
-                        current_strobe_range_end_sec = strobe_range[1]
                         break
+
+                # Check if we are entering a strobe range
+                if not in_strobe_range:
+                    for strobe_range in strobe_ranges:
+                        if current_time_sec < strobe_range[0] < end_time_sec:
+                            entering_strobe_range = True
+                            print(f"--------------------------")
+                            print(f"Entering strobe range, values: {strobe_range}")
+                            print(f"Entering strobe range, current time: {current_time_sec}")
+                            wait_time_till_strobe = (strobe_range[0] - current_time_sec) * 1000
+                            break
+
+                # Check if we are exiting a strobe range
+                if in_strobe_range:
+                    for strobe_range in strobe_ranges:
+                        if current_time_sec < strobe_range[1] < end_time_sec:
+                            exiting_strobe_range = True
+                            # print(f"--------------------------")
+                            # print(f"Exiting strobe range, values: {strobe_range}")
+                            # print(f"Exiting strobe range, current time: {current_time_sec}")
+                            wait_time_till_strobe = (strobe_range[1] - current_time_sec) * 1000
+                            break
+
+            if entering_strobe_range:
+                # Adjust wait time to the time till the strobe range
+                wait_time = wait_time_till_strobe
+
+            if in_strobe_range and exiting_strobe_range:
+                wait_time = wait_time_till_strobe + 1
             
             # Check if we need to insert dynamic dimmer updates during this wait
             dimmer_condition = (
@@ -959,8 +1087,7 @@ class ShowStructurer:
                 light_strength_envelope and
                 fixture_dimmers and
                 seperate_dimmer and
-                pattern_started and 
-                not in_strobe_range and 
+                not in_strobe_range and
                 not is_pause
             )
 
@@ -969,17 +1096,25 @@ class ShowStructurer:
             if dimmer_condition:
                 active_ranges = light_strength_envelope.get("active_ranges", [])
                 # Add dynamic dimmer updates during this wait period
-                found_updates= self._add_dynamic_dimmer_updates(
+                found_updates = self._add_dynamic_dimmer_updates(
                     segment, segment_dimmers, fixture_dimmers, 
                     wait_time, current_time_ms, update_frequency_ms, 
                     envelope_function=envelope_function,
-                    active_ranges=active_ranges
+                    active_ranges=active_ranges,
+                    strobe_ranges=strobe_ranges
                 )
 
-            segment.append(self._wait(wait_time, f"Wait for {q[0]} Pattern started: {pattern_started} is pause: {is_pause}"))
+            if entering_strobe_range:
+                comment = f"Time: {current_time_sec}. Entering range ({strobe_range[0]} - {strobe_range[1]})"
+            elif in_strobe_range:
+                comment = f"Time: {current_time_sec}. In range ({strobe_range[0]} - {strobe_range[1]})"
+            elif exiting_strobe_range:
+                comment = f"Time: {current_time_sec}. Exiting range ({strobe_range[0]} - {strobe_range[1]})"
+            else:
+                comment = f"Time: {current_time_sec}."
+            segment.append(self._wait(wait_time, comment))
             if seperate_dimmer and not found_updates:
-                segment_dimmers.append(self._wait(wait_time, f"First Wait for {q[0]} (dimmer), pattern started: {pattern_started}"))
-            pattern_started = True
+                segment_dimmers.append(self._wait(wait_time, comment))
             
             current_time_ms += wait_time
             current_time_sec = current_time_ms / 1000.0
@@ -989,6 +1124,18 @@ class ShowStructurer:
                 times[name] -= wait_time
                 if times[name] < 0:
                     times[name] = 0
+
+            if entering_strobe_range:
+                # print(f"Entering strobe range, current time: {current_time_sec}")
+                # print(f"Current queue: {q[0]}, next wait q0 {times[q[0]]}time: {remainder_wait_time}")
+                continue
+            if exiting_strobe_range:
+                # print(f"Exiting strobe range, current time: {current_time_sec}")
+                # print(f"Current queue: {q[0]}, next wait q0 {times[q[0]]}time: {remainder_wait_time}")
+                segment, segment_dimmers = self.restore_fixture_states(
+                    fixture_dimmers, segment, segment_dimmers, current_time_sec, envelope_function
+                )
+                continue
                     
             # Process commands
             commands = queue.dequeue()
@@ -1006,60 +1153,35 @@ class ShowStructurer:
                         channel = int(channel)
                         original_value = int(value)
                         
+                        # Always update the fixture state dictionary for tracking, regardless of strobe range
                         if fixture_id not in fixture_dimmers:
                             fixture_dimmers[fixture_id] = {}
                         fixture_dimmers[fixture_id][channel] = original_value
                         
-                        # Fast lookup using our map instead of searching nested dictionaries
-                        is_dimmer_command = (fixture_id in self.fixture_dimmer_map and 
-                                        channel == self.fixture_dimmer_map[fixture_id])
-                        
-                        if is_dimmer_command and seperate_dimmer:
-                            # Get current envelope strength
-                            strength = envelope_function(current_time_sec)
-                            
-                            if is_slowflash:
-                                scaled_value = int(original_value * strength)
-                            else:
-                                scaled_value = original_value
-                            
-                            # Create new command with scaled value
-                            dimmer_command = self._setfixture(fixture_id, channel, scaled_value,
-                                                                f"Scaled value {scaled_value} from {original_value}")
-                                
-                            # Add to dimmer segment
-                            if not in_strobe_range:
-                                segment_dimmers.append(dimmer_command)
-                        else:
-                            if not in_strobe_range:
-                                segment.append(command)
-                    else:
+                        # Only add commands to segments if not in a strobe range
                         if not in_strobe_range:
-                            segment.append(command)
-
-            if in_strobe_range:
-                wait_time = (current_strobe_range_end_sec - current_time_sec) * 1000
-                if wait_time > 0:
-                    segment.append(self._wait(wait_time, f"Wait for strobe range"))
-                    if seperate_dimmer:
-                        segment_dimmers.append(self._wait(wait_time, f"Wait for strobe range (dimmer)"))
-                for fixture_id in fixture_dimmers:
-                    for channel, value in fixture_dimmers[fixture_id].items():
-                        # Check if dimmer
-                        if channel == self.fixture_dimmer_map.get(fixture_id, None):
-                            # Get current envelope strength
-                            strength = envelope_function(current_time_sec)
-                            scaled_value = int(value * strength)
+                            # Fast lookup using our map instead of searching nested dictionaries
+                            is_dimmer_command = (fixture_id in self.fixture_dimmer_map and 
+                                            channel == self.fixture_dimmer_map[fixture_id])
                             
-                            dimmer_command = self._setfixture(fixture_id, channel, scaled_value,
-                                                              f"Scaled value {scaled_value} from {value}")
+                            if is_dimmer_command and seperate_dimmer:
+                                # Get current envelope strength
+                                strength = envelope_function(current_time_sec)
                                 
-                            # Add to dimmer segment
-                            segment_dimmers.append(dimmer_command)
-                        else:
-                            command = self._setfixture(fixture_id, channel, value, 
-                                                       f"Set fixture {fixture_id} channel {channel} to {value}")
-                            segment.append(command)
+                                if is_slowflash:
+                                    scaled_value = int(original_value * strength)
+                                else:
+                                    scaled_value = original_value
+                                
+                                # Create new command with scaled value
+                                dimmer_command = self._setfixture(fixture_id, channel, scaled_value,
+                                                                f"Scaled value {scaled_value} from {original_value}")
+                                    
+                                segment_dimmers.append(dimmer_command)
+                            else:
+                                segment.append(command)
+                    elif not in_strobe_range:  # Only add non-fixture commands if not in strobe range
+                        segment.append(command)
 
             # Get next wait period
             wait = queue.dequeue()
@@ -1067,13 +1189,34 @@ class ShowStructurer:
                 times[q[0]] = wait
         
         return segment, segment_dimmers
+    
+    def restore_fixture_states(self, fixture_dimmers, segment, segment_dimmers, current_time_sec, envelope_function):
+        """
+        Restores the fixture dimmer states to their original values.
+        
+        Args:
+            fixture_dimmers: Dictionary of current fixture dimmer values
+            segment_dimmers: Dimmer command segment
+        """
+        for fixture_id, info in fixture_dimmers.items():
+            for channel, value in info.items():
+                if channel == self.fixture_dimmer_map.get(fixture_id, None):
+                    value = value * envelope_function(current_time_sec)
+                    dimmer_command = self._setfixture(fixture_id, channel, value, 
+                                                        f"Restoring original value {value}")
+                    segment_dimmers.append(dimmer_command)
+                else:
+                    cmd = self._setfixture(fixture_id, channel, value)
+                    segment.append(cmd)
+        return segment, segment_dimmers
 
     def _add_dynamic_dimmer_updates(self, segment, segment_dimmers, fixture_dimmers, 
-                                wait_time, current_time_ms, update_frequency_ms,
-                                envelope_function, active_ranges=None):
+                            wait_time, current_time_ms, update_frequency_ms,
+                            envelope_function, active_ranges=None, strobe_ranges=None):
         """
         Adds dynamic dimmer updates during long wait periods based on envelope values.
         Uses pre-calculated active ranges for efficient updates.
+        Handles strobe ranges by stopping updates at strobe boundaries.
         
         Args:
             segment: Main command segment
@@ -1084,8 +1227,32 @@ class ShowStructurer:
             update_frequency_ms: Update frequency in ms
             envelope_function: Function that returns envelope strength at given time
             active_ranges: List of active envelope ranges with start_ms and end_ms
+            strobe_ranges: List of time ranges where strobes are active
         """
-    
+        # Check if we'll enter a strobe range during this wait
+        if strobe_ranges:
+            current_time_sec = current_time_ms / 1000.0
+            end_time_sec = current_time_sec + wait_time/1000
+            
+            # Find the earliest strobe range we might enter
+            earliest_strobe_entry = None
+            for strobe_range in strobe_ranges:
+                # If current time is already in a strobe range, exit immediately
+                if strobe_range[0] <= current_time_sec <= strobe_range[1]:
+                    # We're already in a strobe range, add the full wait and return
+                    segment_dimmers.append(self._wait(wait_time, "In strobe range, skipping dynamic updates"))
+                    return True
+                    
+                # If end time would be in a strobe range, adjust wait_time
+                if current_time_sec < strobe_range[0] < end_time_sec:
+                    time_till_strobe_ms = (strobe_range[0] - current_time_sec) * 1000
+                    if earliest_strobe_entry is None or time_till_strobe_ms < earliest_strobe_entry:
+                        earliest_strobe_entry = time_till_strobe_ms
+            
+            # If we'll enter a strobe range, limit our processing time
+            if earliest_strobe_entry is not None:
+                wait_time = earliest_strobe_entry
+        
         # Use active ranges for precise updates
         wait_end_ms = current_time_ms + wait_time
         
@@ -1136,7 +1303,7 @@ class ShowStructurer:
                         if channel == self.fixture_dimmer_map.get(fixture_id, None):
                             scaled_value = int(value * strength)
                             dimmer_command = self._setfixture(fixture_id, channel, scaled_value, 
-                                                              f"Scaled value {scaled_value} from {value}")
+                                                            f"Scaled value {scaled_value} from {value}")
                             segment_dimmers.append(dimmer_command)
                 
                 range_time_remaining -= update_chunk
@@ -1156,7 +1323,7 @@ class ShowStructurer:
                 wait_between_ranges = min(wait_between_ranges, remaining_wait)
                 
                 if wait_between_ranges > 0:
-                    segment_dimmers.append(self._wait(self.adjusted_wait(wait_between_ranges), f"Wait between ranges"))
+                    segment_dimmers.append(self._wait(wait_between_ranges, f"Wait between ranges"))
                     update_time_ms += wait_between_ranges
                     remaining_wait -= wait_between_ranges
         
@@ -1165,6 +1332,54 @@ class ShowStructurer:
             segment_dimmers.append(self._wait(remaining_wait, f"Finished, wait for {remaining_wait}ms"))
 
         return True
+    
+    def preprocess_onset_ranges(self, start_time, end_time, onset_ranges):
+        """
+        Preprocess onset ranges for a specific time segment.
+        
+        Args:
+            start_time: Start time of segment in seconds
+            end_time: End time of segment in seconds
+            onset_ranges: List of [start, end] ranges in seconds
+            
+        Returns:
+            List of onset ranges adjusted relative to start_time
+        """
+        if not onset_ranges:
+            return []
+            
+        processed_ranges = []
+        segment_duration = end_time - start_time
+        
+        for onset_start, onset_end in onset_ranges:
+            # Check if this onset range overlaps with our segment
+            if onset_end <= start_time or onset_start >= end_time:
+                # No overlap, skip this range
+                continue
+                
+            # Adjust start if needed
+            if onset_start < start_time:
+                # If onset starts before our segment, adjust to 0.1s after segment start
+                adjusted_start = 0.1
+            else:
+                # Otherwise shift relative to segment start
+                adjusted_start = onset_start - start_time
+                
+            # Adjust end if needed
+            if onset_end > end_time:
+                # If onset ends after our segment, adjust to 0.1s before segment end
+                adjusted_end = segment_duration - 0.1
+            else:
+                # Otherwise shift relative to segment start
+                adjusted_end = onset_end - start_time
+                
+            # Make sure we don't have an invalid range after adjustments
+            if adjusted_end <= adjusted_start:
+                continue
+                
+            processed_ranges.append([adjusted_start, adjusted_end])
+        
+        return processed_ranges
 
     def generate_show(self, name, qxw, strobes=True):
         # delay for powershell command
@@ -1184,7 +1399,7 @@ class ShowStructurer:
             onset_parts = show.struct["onset_parts"]
             for part in onset_parts:
                 queues = []
-                queues.append(self.randomstrobe(name, show, length=part[1]*1000-part[0]*1000, start=part[0]*1000 + delay, queuename=f"strobe{part[0]}", waittime=20))
+                queues.append(self.randomstrobe(name, show, length=part[1]*1000-part[0]*1000, start=part[0]*1000 + delay, queuename=f"strobe{part[0]}", light_selection_period=50))
                 scripts.append(self.combine(queues)[0])
                 function_names.append(f"strobe{part[0]}")
 
@@ -1273,7 +1488,7 @@ class ShowStructurer:
                     elif "abovewash" in self.universe:
                         queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
                         lastidle = "Pulse"
-                print(f"Print added idle {lastidle} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
+            print(f"Print added idle {lastidle} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
 
             end_time = segments[i]["end"]*1000 + delay
             light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]
@@ -1281,7 +1496,8 @@ class ShowStructurer:
                 queues,
                 end_time=end_time,
                 light_strength_envelope=light_strength_envelope,
-                strobe_ranges=onset_parts)
+                strobe_ranges=self.preprocess_onset_ranges(segments[i]["start"], segments[i]["end"], onset_parts)
+            )
             scripts.append(segment_queue)
             scripts.append(segment_dimmers)
             function_names.append(str(segments[i]["start"]))

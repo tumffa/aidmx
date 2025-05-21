@@ -1071,6 +1071,7 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
     Calculate a combined strength envelope from kick and snare beat-defining hits.
     Uses ONLY real hits (no phantom/grid markers) for more authentic light patterns.
     Also identifies and returns time ranges where envelope exceeds baseline (0.5).
+    Times in the output are relative to segment start.
     
     Args:
         segment: Segment dictionary containing drum_analysis with beat_defining_hits
@@ -1083,6 +1084,7 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
     drum_analysis = segment["drum_analysis"]
     segment_start = segment["start"]
     segment_end = segment["end"]
+    segment_duration = segment_end - segment_start
     
     # Get kick and snare beat defining hits
     kick_hits = []
@@ -1108,7 +1110,7 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
     # If no hits found, return a flat baseline
     if not kick_hits and not snare_hits:
         return {
-            "times": [segment_start, segment_end],
+            "times": [0, segment_duration],  # Return relative times
             "values": [min_strength, min_strength],
             "segment_start": segment_start,
             "segment_end": segment_end,
@@ -1119,7 +1121,7 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
     avg_kick_strength = sum(strength for _, strength in kick_original_hits) / max(1, len(kick_original_hits)) if kick_original_hits else min_strength
     avg_snare_strength = sum(strength for _, strength in snare_original_hits) / max(1, len(snare_original_hits)) if snare_original_hits else min_strength
     
-    # Filter defining hits to ONLY include real hits - CHANGED HERE
+    # Filter defining hits to ONLY include real hits
     filtered_hits = []
     for time, strength, is_snare in [(t, s, False) for t, s in kick_hits] + [(t, s, True) for t, s in snare_hits]:
         # Check if this is a real hit (not a phantom grid marker)
@@ -1144,7 +1146,7 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
     
     # Start with baseline at segment start
     current_time = segment_start
-    envelope_times.append(current_time)
+    envelope_times.append(current_time)  # Will convert to relative later
     envelope_values.append(min_strength)  # Baseline strength
     
     # Add points for each time step
@@ -1190,7 +1192,7 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
             contribution = max(kick_contribution, snare_contribution)
             current_value = max(min_strength, contribution)
         
-        envelope_times.append(current_time)
+        envelope_times.append(current_time)  # Will convert to relative later
         envelope_values.append(current_value)
         
         # Move to next time step
@@ -1201,7 +1203,7 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
         envelope_times.append(segment_end)
         envelope_values.append(min_strength)
     
-    # NEW CODE: Find ranges where envelope exceeds baseline (0.5)
+    # Find active ranges where envelope exceeds baseline (0.5)
     active_ranges = []
     in_active_range = False
     range_start = None
@@ -1217,10 +1219,10 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
             in_active_range = False
             range_end = time
             
-            # Convert to milliseconds and add to active ranges
+            # Convert to milliseconds and make RELATIVE to segment start
             active_ranges.append({
-                "start_ms": int(range_start * 1000),
-                "end_ms": int(range_end * 1000),
+                "start_ms": int((range_start - segment_start) * 1000),  # Make relative
+                "end_ms": int((range_end - segment_start) * 1000),  # Make relative
                 "duration_ms": int((range_end - range_start) * 1000),
                 "max_value": max(envelope_values[
                     envelope_times.index(range_start):envelope_times.index(range_end)+1
@@ -1229,19 +1231,13 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
     
     print(f"  Found {len(active_ranges)} active envelope ranges")
     
+    # Convert envelope_times to be relative to segment_start
+    relative_envelope_times = [t - segment_start for t in envelope_times]
+    
     return {
-        "times": envelope_times,
+        "times": relative_envelope_times,  # Now relative to segment start
         "values": envelope_values,
-        "segment_start": segment_start,
-        "segment_end": segment_end,
-        "active_ranges": active_ranges  # New field with ranges where value > min_strength
+        "segment_start": segment_start,  # Keep absolute reference for context
+        "segment_end": segment_end,      # Keep absolute reference for context
+        "active_ranges": active_ranges   # Now with relative timestamps
     }
-
-# Example usage
-if __name__ == "__main__":
-    your_filepath = "/home/tumffa/aidmx/demix/htdemucs/mycurse/drums.wav" # full path to your file
-    # Load the audio file
-    y, sr = librosa.load(your_filepath, sr=None, mono=True)
-    segments = None # set this to [ {"start": 0, "end": 10}, {"start": 10, "end": 20} ] etc. if you want specific times
-    onsets = get_onset_parts(segments=segments, input=y, sr=sr)
-    print(onsets)
