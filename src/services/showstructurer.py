@@ -1360,6 +1360,7 @@ class ShowStructurer:
     def preprocess_onset_ranges(self, start_time, end_time, onset_ranges):
         """
         Preprocess onset ranges for a specific time segment.
+        Onset times are provided relative to the song start time, rather than the segment start time.
         
         Args:
             start_time: Start time of segment in seconds
@@ -1367,7 +1368,7 @@ class ShowStructurer:
             onset_ranges: List of [start, end] ranges in seconds
             
         Returns:
-            List of onset ranges adjusted relative to start_time
+            List of onset ranges adjusted relative to segments start_time
         """
         if not onset_ranges:
             return []
@@ -1406,18 +1407,26 @@ class ShowStructurer:
         return processed_ranges
 
     def generate_show(self, name, qxw, strobes=True):
-        # delay for powershell command
+        """
+            Generates all functions, buttons, etc. for a QLC+ file. 
+        Args:
+            name (str): Name of the show to generate
+            qxw (Object): object that handles qlc+ file generation 
+            strobes (bool, optional): Whether or not to include strobe effects. Defaults to True.
+        """
+        # delay for powershell command to sync song and lightshow start
         delay = 310 # milliseconds
-        qxw.create_copy(name)
-        scripts = []
-        function_names = []
-        show = self.create_show(name)
-        sections = show.struct["chorus_sections"]
-        segments = show.struct["segments"]
+        qxw.create_copy(name) # creates a new file based off of preexisting fixture template
+        scripts = [] # list to hold all of the scripts for file
+        function_names = [] # list that holds names of beforementioned scripts
+        show = self.create_show(name) # holds information about song
+        sections = show.struct["chorus_sections"] # energetic segments of the song
+        segments = show.struct["segments"] # segments of the song
         
-        # Add premade chasers
+        # Add premade chasers to use with virtual console
         self.add_chasers(name, show, qxw)
 
+        # Add strobe scripts
         onset_parts = None
         if strobes:
             onset_parts = show.struct["onset_parts"]
@@ -1427,9 +1436,9 @@ class ShowStructurer:
                 scripts.append(self.combine(queues)[0])
                 function_names.append(f"strobe{part[0]}")
 
+        # Add scripts for each pause (blackout) in the song
         queues = []
         pauses = show.struct["silent_ranges"]
-
         for pause in pauses:
             pause_start = pause[0] / 43
             pause_end = pause[1] / 43
@@ -1438,6 +1447,7 @@ class ShowStructurer:
         scripts.append(self.combine(queues)[0])
         function_names.append("pauses")
 
+        # Add scripts for each segment in the song
         i = 0
         if segments[0]["label"] == "start":
             i += 1
