@@ -1066,17 +1066,14 @@ def find_beat_defining_hits(segment, kick_beat_matches, snare_beat_matches, wind
     
     return segment
 
-def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1):
+def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.04, snare_multi=1, max_snare_fadeout=1.5, kick_multi=0.8, max_kick_fadeout=0.8):
     """
     Calculate a combined strength envelope from kick and snare beat-defining hits.
     Uses ONLY real hits (no phantom/grid markers) for more authentic light patterns.
-    Also identifies and returns time ranges where envelope exceeds baseline (0.5).
+    - Snare hits reach 100% intensity with longer fadeouts (up to 1.5s)
+    - Kick hits reach 80% intensity with medium fadeouts (up to 0.8s)
+    - All fadeouts complete to min_strength before next hit
     Times in the output are relative to segment start.
-    
-    Args:
-        segment: Segment dictionary containing drum_analysis with beat_defining_hits
-        resolution_ms: Time resolution in milliseconds for the envelope
-        min_strength: Minimum strength value for the envelope
     """
     if not segment or "drum_analysis" not in segment:
         return {"times": [], "values": [], "segment_start": 0, "segment_end": 0, "active_ranges": []}
@@ -1110,34 +1107,57 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
     # If no hits found, return a flat baseline
     if not kick_hits and not snare_hits:
         return {
-            "times": [0, segment_duration],  # Return relative times
+            "times": [0, segment_duration],
             "values": [min_strength, min_strength],
             "segment_start": segment_start,
             "segment_end": segment_end,
-            "active_ranges": []  # No active ranges since all values are baseline
+            "active_ranges": []
         }
     
-    # Calculate average strengths for real hits only
-    avg_kick_strength = sum(strength for _, strength in kick_original_hits) / max(1, len(kick_original_hits)) if kick_original_hits else min_strength
-    avg_snare_strength = sum(strength for _, strength in snare_original_hits) / max(1, len(snare_original_hits)) if snare_original_hits else min_strength
+    # Combine all hit times to find next hits
+    all_hits = [(time, "snare") for time, _ in snare_hits if any(abs(time - rt) < 0.05 for rt in real_snare_times)]
+    all_hits.extend([(time, "kick") for time, _ in kick_hits if any(abs(time - rt) < 0.05 for rt in real_kick_times)])
+    all_hits.sort(key=lambda x: x[0])  # Sort by time
     
-    # Filter defining hits to ONLY include real hits
-    filtered_hits = []
-    for time, strength, is_snare in [(t, s, False) for t, s in kick_hits] + [(t, s, True) for t, s in snare_hits]:
-        # Check if this is a real hit (not a phantom grid marker)
-        is_real_hit = (not is_snare and any(abs(time - rt) < 0.05 for rt in real_kick_times)) or \
-                      (is_snare and any(abs(time - rt) < 0.05 for rt in real_snare_times))
-        
-        # Only add real hits (completely exclude phantom hits)
-        if is_real_hit:
-            # Use fixed strength values for kick/snare
-            if is_snare:
-                filtered_hits.append((time, 1.0, is_snare, True))  # Snare hits = 1.0
-            else:
-                filtered_hits.append((time, 0.85, is_snare, True))  # Kick hits = 0.85
+    # Process snare hits to calculate their fade-out windows
+    snare_fadeouts = []
+    kick_fadeouts = []
     
-    # Sort by time
-    filtered_hits.sort(key=lambda x: x[0])
+    # Only create fade-outs for actual snare hits
+    for time, strength in snare_hits:
+        # Check if this is a real snare hit
+        if any(abs(time - rt) < 0.05 for rt in real_snare_times):
+            # Find time to next defining hit (of any type)
+            next_hit_time = segment_end
+            for hit_time, _ in all_hits:
+                if hit_time > time and hit_time < next_hit_time:
+                    next_hit_time = hit_time
+            
+            # Calculate fade-out time (min between time to next hit or max fadeout)
+            time_to_next = next_hit_time - time
+            # Ensure fadeout completes before the next hit
+            fadeout_time = min(time_to_next, max_snare_fadeout)
+            
+            # Store snare with its fadeout time
+            snare_fadeouts.append((time, strength, fadeout_time))
+    
+    # Only create fade-outs for actual kick hits (NEW)
+    for time, strength in kick_hits:
+        # Check if this is a real kick hit
+        if any(abs(time - rt) < 0.05 for rt in real_kick_times):
+            # Find time to next defining hit (of any type)
+            next_hit_time = segment_end
+            for hit_time, _ in all_hits:
+                if hit_time > time and hit_time < next_hit_time:
+                    next_hit_time = hit_time
+            
+            # Calculate fade-out time (min between time to next hit or max fadeout)
+            time_to_next = next_hit_time - time
+            # Ensure fadeout completes before the next hit
+            fadeout_time = min(time_to_next*0.5, max_kick_fadeout)
+            
+            # Store kick with its fadeout time
+            kick_fadeouts.append((time, strength, fadeout_time))
     
     # Generate envelope points
     resolution_sec = resolution_ms / 1000
@@ -1146,53 +1166,91 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
     
     # Start with baseline at segment start
     current_time = segment_start
-    envelope_times.append(current_time)  # Will convert to relative later
-    envelope_values.append(min_strength)  # Baseline strength
+    envelope_times.append(current_time)
+    envelope_values.append(min_strength)
     
     # Add points for each time step
     while current_time <= segment_end:
-        current_value = min_strength  # Baseline
+        # Start with baseline value
+        current_value = min_strength
         
-        # Find nearby hits (within window)
-        window = 0.1  # 100ms window for hit influence
-        nearby_kicks = []
-        nearby_snares = []
+        # Process kick contribution - with EXTENDED FADEOUT
+        kick_contribution = min_strength
         
-        # Simplified because we know all hits are real now
-        for hit_time, strength, is_snare, _ in filtered_hits:
-            if abs(hit_time - current_time) <= window:
-                if not is_snare:  # Kick
-                    nearby_kicks.append((hit_time, 0.85))  # Fixed strength for kicks
-                else:  # Snare
-                    nearby_snares.append((hit_time, 1.0))  # Fixed strength for snares
+        # Process immediate kick influence for smoother initial peak
+        for kick_time, kick_strength in kick_hits:
+            if any(abs(kick_time - rt) < 0.05 for rt in real_kick_times):
+                kick_time_diff = abs(kick_time - current_time)
+                window_kick = 0.1  # 100ms window for immediate kick influence
+                
+                if kick_time_diff <= window_kick:
+                    # Time falloff - closer hits have more influence
+                    time_weight = 1.0 - (kick_time_diff / window_kick)
+                    kick_value = kick_multi * time_weight  # Kick reaches 80% max
+                    kick_contribution = max(kick_contribution, kick_value)
         
-        # Calculate strength from nearby hits
-        # Process kicks first
-        kick_contribution = 0
-        if nearby_kicks:
-            strongest_kick = max(nearby_kicks, key=lambda x: x[1])
-            kick_time_diff = abs(strongest_kick[0] - current_time)
-            
-            # Time falloff - closer hits have more influence
-            time_weight = 1.0 - (kick_time_diff / window)
-            kick_contribution = 0.85 * time_weight  # Fixed kick strength
+        # Process extended kick fadeouts (NEW)
+        for kick_time, kick_strength, fadeout_time in kick_fadeouts:
+            # Check if this time point is within the fadeout window
+            if kick_time <= current_time <= (kick_time + fadeout_time):
+                # Calculate how far into the fadeout we are
+                fadeout_progress = (current_time - kick_time) / fadeout_time
+                
+                # Make sure we reach EXACTLY min_strength at the end
+                if fadeout_progress >= 0.999:  # Just before the end
+                    kick_value = min_strength
+                else:
+                    # Create a smoother decay curve
+                    decay_factor = 1.0 - fadeout_progress
+                    decay_factor = decay_factor ** 1.5  # Smoother curve
+                    
+                    # Calculate contribution with gradual falloff to min_strength
+                    initial_strength = kick_multi  # 80% max intensity for kicks
+                    kick_value = min_strength + (initial_strength - min_strength) * decay_factor
+                
+                kick_contribution = max(kick_contribution, kick_value)
         
-        # Process snares
-        snare_contribution = 0
-        if nearby_snares:
-            strongest_snare = max(nearby_snares, key=lambda x: x[1])
-            snare_time_diff = abs(strongest_snare[0] - current_time)
-            
-            # Time falloff
-            time_weight = 1.0 - (snare_time_diff / window)
-            snare_contribution = 1.0 * time_weight  # Fixed snare strength
+        # Process snare influence with extended fade-out
+        snare_contribution = min_strength
         
-        # Combine contributions
-        if kick_contribution > 0 or snare_contribution > 0:
-            contribution = max(kick_contribution, snare_contribution)
-            current_value = max(min_strength, contribution)
+        # First check for immediate snare impact
+        window_snare_immediate = 0.1  # 100ms for immediate impact
         
-        envelope_times.append(current_time)  # Will convert to relative later
+        for snare_time, snare_strength in snare_hits:
+            # Check if this is a real snare hit
+            if any(abs(snare_time - rt) < 0.05 for rt in real_snare_times):
+                snare_time_diff = abs(snare_time - current_time)
+                
+                if snare_time_diff <= window_snare_immediate:
+                    # Time falloff for immediate impact
+                    time_weight = 1.0 - (snare_time_diff / window_snare_immediate)
+                    immediate_value = snare_multi * time_weight  # Full strength for snare
+                    snare_contribution = max(snare_contribution, immediate_value)
+        
+        # Then process extended snare fadeouts (ensure they reach min_strength)
+        for snare_time, snare_strength, fadeout_time in snare_fadeouts:
+            # Check if this time point is within the fadeout window
+            if snare_time <= current_time <= (snare_time + fadeout_time):
+                # Calculate how far into the fadeout we are
+                fadeout_progress = (current_time - snare_time) / fadeout_time
+                
+                # Make sure we reach EXACTLY min_strength at the end
+                if fadeout_progress >= 0.999:  # Just before the end
+                    snare_value = min_strength
+                else:
+                    # Create a smoother decay curve
+                    decay_factor = 1.0 - fadeout_progress
+                    decay_factor = decay_factor ** 1.5  # Smoother curve
+                    
+                    # Calculate contribution with gradual falloff to min_strength
+                    snare_value = min_strength + (snare_multi - min_strength) * decay_factor
+                
+                snare_contribution = max(snare_contribution, snare_value)
+        
+        # Take the maximum of kick and snare contributions
+        current_value = max(kick_contribution, snare_contribution)
+        
+        envelope_times.append(current_time)
         envelope_values.append(current_value)
         
         # Move to next time step
@@ -1214,8 +1272,8 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
             in_active_range = True
             range_start = time
             
-        # Detect transition out of active range
-        elif (value <= min_strength or i == len(envelope_values) - 1) and in_active_range:
+        # Detect transition out of active range - now checks for exactly min_strength
+        elif (value <= min_strength + 0.001 or i == len(envelope_values) - 1) and in_active_range:
             in_active_range = False
             range_end = time
             
@@ -1230,6 +1288,7 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.1
             })
     
     print(f"  Found {len(active_ranges)} active envelope ranges")
+    print(f"  Processed {len(kick_fadeouts)} kick hits and {len(snare_fadeouts)} snare hits")
     
     # Convert envelope_times to be relative to segment_start
     relative_envelope_times = [t - segment_start for t in envelope_times]

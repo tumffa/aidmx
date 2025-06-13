@@ -82,7 +82,7 @@ class ShowStructurer:
             env_times, 
             env_values,
             bounds_error=False,     # Don't raise error for out-of-bounds
-            fill_value=(0.5, 0.5)   # Use 0.5 (baseline) for points outside range
+            fill_value=(0.1, 0.1)   # Baseline value for out-of-bounds
         )
         
         # Return a closure function that handles the interpolation
@@ -1463,66 +1463,69 @@ class ShowStructurer:
             found = False
             subsegment = segments[i].get("subsegment", False)
 
-            for section in sections:
-                if segments[i]["start"] == section["seg_start"]:
-                    found = True
-                    length = (segments[i]["end"] - segments[i]["start"])*1000
-                    types = ["alternate", "side_to_side"]
-                    last_choice = None
-                    if segments[i]["label"] == show.struct["focus"]["first"]:
-                        if onefocus == False:
-                            queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
-                        elif lastchaser == "FastPulse" and "abovewash" in self.universe:
-                            if subsegment:
-                                queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
-                                if "abovewash" in self.universe:
-                                    queues.append(self.alternate_flood(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
-                                lastchaser = "FastPulse"
-                            else:
-                                queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
-                                lastchaser = "SideToSide"
-                        elif lastchaser == "SideToSide" or "abovewash" not in self.universe:
-                            if subsegment:
-                                queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
-                                lastchaser = "SideToSide"
-                            else:
-                                queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
-                                if "abovewash" in self.universe:
-                                    queues.append(self.alternate_flood(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
-                                lastchaser = "FastPulse"
-                        print(f"Print added energetic {lastchaser} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
-                    else:
-                        type = random.choice(types)
-                        while type == last_choice:
-                            type = random.choice(types)
-                        last_choice = type
-                        if "abovewash" not in self.universe:
-                            type = "alternate"
-                        if type == "alternate":
-                            queues.append(self.alternate(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
-                        else:
-                            queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
-                        print(f"Print added normal {last_choice} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
-                    break
+            queues.append(self.simple_color(
+                name, show, dimmer=255, length=(segments[i]["end"] - segments[i]["start"])*1000, start=start_time, queuename=f"color{i}"))
 
-            if found == False:
-                length = (segments[i]["end"] - segments[i]["start"])*1000
-                # queues.append(self.idle(name, show=show, length=length, start=start_time, queuename=f"idle{i}"))
-                if segments[i-1]["label"] == segments[i]["label"]:
-                    if lastidle == "Pulse" and "abovewash" in self.universe:
-                        queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
-                        lastidle = "Pulse"
-                    else:
-                        queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
-                        lastidle = "SlowFlash"
-                else:
-                    if lastidle == "Pulse" or "abovewash" not in self.universe:
-                        queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
-                        lastidle = "SlowFlash"
-                    elif "abovewash" in self.universe:
-                        queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
-                        lastidle = "Pulse"
-            print(f"Print added idle {lastidle} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
+            # for section in sections:
+            #     if segments[i]["start"] == section["seg_start"]:
+            #         found = True
+            #         length = (segments[i]["end"] - segments[i]["start"])*1000
+            #         types = ["alternate", "side_to_side"]
+            #         last_choice = None
+            #         if segments[i]["label"] == show.struct["focus"]["first"]:
+            #             if onefocus == False:
+            #                 queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
+            #             elif lastchaser == "FastPulse" and "abovewash" in self.universe:
+            #                 if subsegment:
+            #                     queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
+            #                     if "abovewash" in self.universe:
+            #                         queues.append(self.alternate_flood(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
+            #                     lastchaser = "FastPulse"
+            #                 else:
+            #                     queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
+            #                     lastchaser = "SideToSide"
+            #             elif lastchaser == "SideToSide" or "abovewash" not in self.universe:
+            #                 if subsegment:
+            #                     queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
+            #                     lastchaser = "SideToSide"
+            #                 else:
+            #                     queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
+            #                     if "abovewash" in self.universe:
+            #                         queues.append(self.alternate_flood(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
+            #                     lastchaser = "FastPulse"
+            #             print(f"Print added energetic {lastchaser} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
+            #         else:
+            #             type = random.choice(types)
+            #             while type == last_choice:
+            #                 type = random.choice(types)
+            #             last_choice = type
+            #             if "abovewash" not in self.universe:
+            #                 type = "alternate"
+            #             if type == "alternate":
+            #                 queues.append(self.alternate(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
+            #             else:
+            #                 queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
+            #             print(f"Print added normal {last_choice} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
+            #         break
+
+            # if found == False:
+            #     length = (segments[i]["end"] - segments[i]["start"])*1000
+            #     # queues.append(self.idle(name, show=show, length=length, start=start_time, queuename=f"idle{i}"))
+            #     if segments[i-1]["label"] == segments[i]["label"]:
+            #         if lastidle == "Pulse" and "abovewash" in self.universe:
+            #             queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
+            #             lastidle = "Pulse"
+            #         else:
+            #             queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
+            #             lastidle = "SlowFlash"
+            #     else:
+            #         if lastidle == "Pulse" or "abovewash" not in self.universe:
+            #             queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
+            #             lastidle = "SlowFlash"
+            #         elif "abovewash" in self.universe:
+            #             queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
+            #             lastidle = "Pulse"
+            # print(f"Print added idle {lastidle} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
 
             end_time = segments[i]["end"]*1000 + delay
             light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]
