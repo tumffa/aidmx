@@ -1066,7 +1066,7 @@ def find_beat_defining_hits(segment, kick_beat_matches, snare_beat_matches, wind
     
     return segment
 
-def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.04, snare_multi=1, max_snare_fadeout=1.5, kick_multi=0.8, max_kick_fadeout=0.8):
+def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.05, snare_multi=1, max_snare_fadeout=1.5, kick_multi=0.5, max_kick_fadeout=0.8):
     """
     Calculate a combined strength envelope from kick and snare beat-defining hits.
     Uses ONLY real hits (no phantom/grid markers) for more authentic light patterns.
@@ -1154,7 +1154,7 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.0
             # Calculate fade-out time (min between time to next hit or max fadeout)
             time_to_next = next_hit_time - time
             # Ensure fadeout completes before the next hit
-            fadeout_time = min(time_to_next*0.5, max_kick_fadeout)
+            fadeout_time = min(time_to_next, max_kick_fadeout)
             
             # Store kick with its fadeout time
             kick_fadeouts.append((time, strength, fadeout_time))
@@ -1261,14 +1261,14 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.0
         envelope_times.append(segment_end)
         envelope_values.append(min_strength)
     
-    # Find active ranges where envelope exceeds baseline (0.5)
+    # Find active ranges where envelope exceeds baseline (0.2)
     active_ranges = []
     in_active_range = False
     range_start = None
     
     for i, (time, value) in enumerate(zip(envelope_times, envelope_values)):
         # Detect transition into active range
-        if value > 0.5 and not in_active_range:
+        if value > 0.2 and not in_active_range:
             in_active_range = True
             range_start = time
             

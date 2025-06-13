@@ -82,7 +82,7 @@ class ShowStructurer:
             env_times, 
             env_values,
             bounds_error=False,     # Don't raise error for out-of-bounds
-            fill_value=(0.1, 0.1)   # Baseline value for out-of-bounds
+            fill_value=(0.05, 0.05)   # Baseline value for out-of-bounds
         )
         
         # Return a closure function that handles the interpolation
