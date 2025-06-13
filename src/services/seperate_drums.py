@@ -7,7 +7,7 @@ import numpy as np
 import scipy.io.wavfile as wav
 import librosa
 
-def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=0.7, device="cuda"):
+def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, device="cuda"):
     """
     Separates drum components using LarsNet with a local conda environment.
     
