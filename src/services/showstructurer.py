@@ -1600,7 +1600,7 @@ class ShowStructurer:
             strobes (bool, optional): Whether or not to include strobe effects. Defaults to True.
         """
         # delay for powershell command to sync song and lightshow start
-        delay = 310 # milliseconds
+        delay = 760 # milliseconds
         qxw.create_copy(name) # creates a new file based off of preexisting fixture template
         scripts = [] # list to hold all of the scripts for file
         function_names = [] # list that holds names of beforementioned scripts
