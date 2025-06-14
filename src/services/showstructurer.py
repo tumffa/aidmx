@@ -35,8 +35,10 @@ class ShowStructurer:
                 self.fixture_dimmer_map[fixture_id] = dimmer_channel
 
         self.dimmer_update_fq = 15 # ms
-        self.wait_adjustment = 0.05  # Adjust wait time to help with lag
-        self.pause_wait_adjustment = 0.02  # Adjust wait time to help with lag
+        # I've observed that QLC+ scripts have compounding lag the longer
+        # the script gets, so I add an adjustment to combat this
+        self.wait_adjustment = 0.08
+        self.pause_wait_adjustment = 0.02
 
     def adjusted_wait(self, time, is_pause=False):
         if is_pause:
@@ -82,7 +84,7 @@ class ShowStructurer:
             env_times, 
             env_values,
             bounds_error=False,     # Don't raise error for out-of-bounds
-            fill_value=(0.05, 0.05)   # Baseline value for out-of-bounds
+            fill_value=(0.01, 0.01)   # Baseline value for out-of-bounds
         )
         
         # Return a closure function that handles the interpolation
@@ -953,6 +955,189 @@ class ShowStructurer:
         result["queue"] = color_queue
         return result
     
+    def color_pulse(self, name, show, color1="red", color2="blue", dimmer=255, length=30000.0, start=0, queuename="colorpulse0"):
+        """
+        Creates a chaser effect that alternates between colors, changing each fixture gradually.
+        - Colors use much faster transitions (50 units at a time)
+        - Colors always progress forward without going back
+        - Ensures pure color transitions (no unintended channel blending)
+        """
+        result = {}
+        colorpulse_queue = Queue()
+        result["name"] = queuename
+        colorpulse_queue.enqueue(start)  # Start time
+        
+        # Get fixtures from abovewash group
+        fixtures = []
+        if "abovewash" in self.universe:
+            fixtures = list(self.universe["abovewash"].values())
+        else:
+            # Return empty result if no abovewash fixtures
+            result["queue"] = colorpulse_queue
+            return result
+        
+        # Setup colors
+        colorspectrum = ["red", "green", "blue", "pink", "yellow", "cyan", "orange", "purple"]
+        if color1 == "random":
+            color1 = random.choice(colorspectrum)
+        if color2 == "random" or color2 is None:
+            color2 = random.choice(colorspectrum)
+            while color2 == color1:  # Ensure different colors
+                color2 = random.choice(colorspectrum)
+        
+        # Define the color mappings with PURE RGB values - no mixing
+        color_map = {
+            "white": {"red": 255, "green": 255, "blue": 255},
+            "red": {"red": 255, "green": 0, "blue": 0},
+            "green": {"red": 0, "green": 255, "blue": 0},
+            "blue": {"red": 0, "green": 0, "blue": 255},
+            "pink": {"red": 255, "green": 0, "blue": 255},
+            "yellow": {"red": 255, "green": 255, "blue": 0},
+            "cyan": {"red": 0, "green": 255, "blue": 255},
+            "orange": {"red": 255, "green": 80, "blue": 0},
+            "purple": {"red": 128, "green": 0, "blue": 255}
+        }
+        
+        # Create a sequence of colors to rotate through
+        color_sequence = []
+        if color1 == "random" and color2 == "random":
+            # Start with 2 different random colors
+            current_color = random.choice(colorspectrum)
+            color_sequence.append(current_color)
+            next_color = random.choice([c for c in colorspectrum if c != current_color])
+            color_sequence.append(next_color)
+        else:
+            # Use the provided colors to start
+            color_sequence = [color1, color2]
+        
+        # Calculate time and steps
+        beatinterval = show.beatinterval * 1000  # Beat interval in ms
+        time = length
+        
+        # Track the current position in the color sequence
+        current_color_index = 0
+        
+        # MUCH faster color transitions (50 units at a time)
+        color_increment = 50
+        
+        # Main loop for alternating between color transitions and holds
+        while time > 1:
+            # Get current and next colors from the sequence
+            current_color = color_sequence[current_color_index]
+            
+            # Calculate next color index (always progress forward)
+            next_color_index = (current_color_index + 1) % len(color_sequence)
+            next_color = color_sequence[next_color_index]
+            
+            # Get color values
+            source_color_values = color_map[current_color]
+            target_color_values = color_map[next_color]
+            
+            # PHASE 1: TRANSITION to next color
+            # Calculate how many steps needed for each color component with larger increments
+            steps_needed = {}
+            max_steps = 0
+            for channel in ["red", "green", "blue"]:
+                change = abs(target_color_values[channel] - source_color_values[channel])
+                steps_needed[channel] = (change + color_increment - 1) // color_increment  # Ceiling division
+                max_steps = max(max_steps, steps_needed[channel])
+            
+            # Ensure at least 1 step even if no color change
+            max_steps = max(1, max_steps)
+            
+            # Calculate step interval to complete the transition within a beat
+            step_interval = beatinterval / max_steps
+            
+            # Perform the color transition
+            current_colors = source_color_values.copy()
+            for step in range(max_steps):
+                temp = []
+                
+                # Update each RGB component with larger increments
+                for channel in ["red", "green", "blue"]:
+                    if step < steps_needed[channel]:
+                        direction = 1 if target_color_values[channel] > source_color_values[channel] else -1
+                        change = min(color_increment, abs(target_color_values[channel] - current_colors[channel]))
+                        current_colors[channel] += direction * change
+                    # Explicitly set channels that don't need to change to their target value
+                    # This ensures we don't get unwanted blending
+                    elif source_color_values[channel] == target_color_values[channel]:
+                        current_colors[channel] = target_color_values[channel]
+                
+                # Apply the current colors to all fixtures
+                for fixture in fixtures:
+                    if fixture["colortype"] == "seperate":
+                        temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], current_colors["red"], f"Red: {current_colors['red']}"))
+                        temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], current_colors["green"], f"Green: {current_colors['green']}"))
+                        temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], current_colors["blue"], f"Blue: {current_colors['blue']}"))
+                    
+                    # Set dimmer and shutter
+                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer, f"Dimmer"))
+                    temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
+                
+                colorpulse_queue.enqueue(temp)
+                
+                # Calculate wait time
+                wait_time = step_interval
+                if time - wait_time < 0:
+                    wait_time = time
+                time -= wait_time
+                
+                if time > 1:
+                    colorpulse_queue.enqueue(wait_time)
+                else:
+                    break
+            
+            # PHASE 2: HOLD the new color - ensure we set EXACT target color values
+            if time > 1:
+                temp = []
+                # Apply target color to all fixtures - with EXACT color values
+                for fixture in fixtures:
+                    if fixture["colortype"] == "seperate":
+                        temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["red"], target_color_values["red"], f"Hold Red: {target_color_values['red']}"))
+                        temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["green"], target_color_values["green"], f"Hold Green: {target_color_values['green']}"))
+                        temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], target_color_values["blue"], f"Hold Blue: {target_color_values['blue']}"))
+                    
+                    # Set dimmer and shutter
+                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer, f"Dimmer"))
+                    temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
+                
+                colorpulse_queue.enqueue(temp)
+                
+                # Hold for a full beat
+                wait_time = beatinterval
+                if time - wait_time < 0:
+                    wait_time = time
+                time -= wait_time
+                
+                if time > 1:
+                    colorpulse_queue.enqueue(wait_time)
+                else:
+                    break
+            
+            # Move to the next color in the sequence
+            current_color_index = next_color_index
+            
+            # Every 2 cycles, add a new color to keep things interesting
+            if current_color_index % 2 == 0 and color1 == "random":
+                # Pick a new color that's different from the last two
+                colors_to_avoid = [color_sequence[current_color_index], color_sequence[(current_color_index + 1) % len(color_sequence)]]
+                
+                if len(colorspectrum) > len(colors_to_avoid):
+                    new_color = random.choice([c for c in colorspectrum if c not in colors_to_avoid])
+                    
+                    # If we've built up more than 3 colors in our sequence, replace the oldest
+                    if len(color_sequence) > 3:
+                        # Replace the color that's 2 ahead of current (will be used in 2 cycles)
+                        replace_index = (current_color_index + 2) % len(color_sequence)
+                        color_sequence[replace_index] = new_color
+                    else:
+                        # Otherwise just add the new color
+                        color_sequence.append(new_color)
+        
+        result["queue"] = colorpulse_queue
+        return result
+    
     #### this is the meat and potatoes here ####
     def combine(self, queues, end_time=None, seperate_dimmer=True, light_strength_envelope=None, strobe_ranges=None):
         """
@@ -1463,69 +1648,71 @@ class ShowStructurer:
             found = False
             subsegment = segments[i].get("subsegment", False)
 
-            queues.append(self.simple_color(
+            for section in sections:
+                if segments[i]["start"] == section["seg_start"]:
+                    found = True
+                    length = (segments[i]["end"] - segments[i]["start"])*1000
+                    types = ["alternate", "side_to_side"]
+                    last_choice = None
+                    queues.append(self.color_pulse(
+                        name, show, color1="red", color2="blue", dimmer=255,
+                        length=length, start=start_time, queuename=f"colorpulse{i}"))
+                    # if segments[i]["label"] == show.struct["focus"]["first"]:
+                    #     if onefocus == False:
+                    #         queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
+                    #     elif lastchaser == "FastPulse" and "abovewash" in self.universe:
+                    #         if subsegment:
+                    #             queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
+                    #             if "abovewash" in self.universe:
+                    #                 queues.append(self.alternate_flood(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
+                    #             lastchaser = "FastPulse"
+                    #         else:
+                    #             queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
+                    #             lastchaser = "SideToSide"
+                    #     elif lastchaser == "SideToSide" or "abovewash" not in self.universe:
+                    #         if subsegment:
+                    #             queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
+                    #             lastchaser = "SideToSide"
+                    #         else:
+                    #             queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
+                    #             if "abovewash" in self.universe:
+                    #                 queues.append(self.alternate_flood(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
+                    #             lastchaser = "FastPulse"
+                    #     print(f"Print added energetic {lastchaser} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
+                    # else:
+                    #     type = random.choice(types)
+                    #     while type == last_choice:
+                    #         type = random.choice(types)
+                    #     last_choice = type
+                    #     if "abovewash" not in self.universe:
+                    #         type = "alternate"
+                    #     if type == "alternate":
+                    #         queues.append(self.alternate(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
+                    #     else:
+                    #         queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
+                    #     print(f"Print added normal {last_choice} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
+                    break
+
+            if found == False:
+                length = (segments[i]["end"] - segments[i]["start"])*1000
+                queues.append(self.simple_color(
                 name, show, dimmer=255, length=(segments[i]["end"] - segments[i]["start"])*1000, start=start_time, queuename=f"color{i}"))
-
-            # for section in sections:
-            #     if segments[i]["start"] == section["seg_start"]:
-            #         found = True
-            #         length = (segments[i]["end"] - segments[i]["start"])*1000
-            #         types = ["alternate", "side_to_side"]
-            #         last_choice = None
-            #         if segments[i]["label"] == show.struct["focus"]["first"]:
-            #             if onefocus == False:
-            #                 queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
-            #             elif lastchaser == "FastPulse" and "abovewash" in self.universe:
-            #                 if subsegment:
-            #                     queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
-            #                     if "abovewash" in self.universe:
-            #                         queues.append(self.alternate_flood(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
-            #                     lastchaser = "FastPulse"
-            #                 else:
-            #                     queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
-            #                     lastchaser = "SideToSide"
-            #             elif lastchaser == "SideToSide" or "abovewash" not in self.universe:
-            #                 if subsegment:
-            #                     queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
-            #                     lastchaser = "SideToSide"
-            #                 else:
-            #                     queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
-            #                     if "abovewash" in self.universe:
-            #                         queues.append(self.alternate_flood(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
-            #                     lastchaser = "FastPulse"
-            #             print(f"Print added energetic {lastchaser} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
-            #         else:
-            #             type = random.choice(types)
-            #             while type == last_choice:
-            #                 type = random.choice(types)
-            #             last_choice = type
-            #             if "abovewash" not in self.universe:
-            #                 type = "alternate"
-            #             if type == "alternate":
-            #                 queues.append(self.alternate(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
-            #             else:
-            #                 queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
-            #             print(f"Print added normal {last_choice} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
-            #         break
-
-            # if found == False:
-            #     length = (segments[i]["end"] - segments[i]["start"])*1000
-            #     # queues.append(self.idle(name, show=show, length=length, start=start_time, queuename=f"idle{i}"))
-            #     if segments[i-1]["label"] == segments[i]["label"]:
-            #         if lastidle == "Pulse" and "abovewash" in self.universe:
-            #             queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
-            #             lastidle = "Pulse"
-            #         else:
-            #             queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
-            #             lastidle = "SlowFlash"
-            #     else:
-            #         if lastidle == "Pulse" or "abovewash" not in self.universe:
-            #             queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
-            #             lastidle = "SlowFlash"
-            #         elif "abovewash" in self.universe:
-            #             queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
-            #             lastidle = "Pulse"
-            # print(f"Print added idle {lastidle} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
+                # # queues.append(self.idle(name, show=show, length=length, start=start_time, queuename=f"idle{i}"))
+                # if segments[i-1]["label"] == segments[i]["label"]:
+                #     if lastidle == "Pulse" and "abovewash" in self.universe:
+                #         queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
+                #         lastidle = "Pulse"
+                #     else:
+                #         queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
+                #         lastidle = "SlowFlash"
+                # else:
+                #     if lastidle == "Pulse" or "abovewash" not in self.universe:
+                #         queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
+                #         lastidle = "SlowFlash"
+                #     elif "abovewash" in self.universe:
+                #         queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
+                #         lastidle = "Pulse"
+            print(f"Print added idle {lastidle} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
 
             end_time = segments[i]["end"]*1000 + delay
             light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]

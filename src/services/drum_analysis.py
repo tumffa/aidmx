@@ -1066,7 +1066,7 @@ def find_beat_defining_hits(segment, kick_beat_matches, snare_beat_matches, wind
     
     return segment
 
-def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.05, snare_multi=1, max_snare_fadeout=1.5, kick_multi=0.5, max_kick_fadeout=0.8):
+def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.01, snare_multi=1, max_snare_fadeout=1.5, kick_multi=0.5, max_kick_fadeout=0.8):
     """
     Calculate a combined strength envelope from kick and snare beat-defining hits.
     Uses ONLY real hits (no phantom/grid markers) for more authentic light patterns.
@@ -1197,7 +1197,7 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.0
                 fadeout_progress = (current_time - kick_time) / fadeout_time
                 
                 # Make sure we reach EXACTLY min_strength at the end
-                if fadeout_progress >= 0.999:  # Just before the end
+                if fadeout_progress >= 0.99:  # Just before the end
                     kick_value = min_strength
                 else:
                     # Create a smoother decay curve
@@ -1235,7 +1235,7 @@ def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.0
                 fadeout_progress = (current_time - snare_time) / fadeout_time
                 
                 # Make sure we reach EXACTLY min_strength at the end
-                if fadeout_progress >= 0.999:  # Just before the end
+                if fadeout_progress >= 0.99:  # Just before the end
                     snare_value = min_strength
                 else:
                     # Create a smoother decay curve
