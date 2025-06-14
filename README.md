@@ -17,6 +17,7 @@ pip install -r requirements.txt
 ## Features
 - **BPM Prediction**: Uses models to estimate the BPM of the song.
 - **Segmentation & Instrument Isolation**: Splits the song into segments and separates instrument tracks.
+- **Dimmer scaling**: Dimmer updates are scaled based on drum activations.
 - **Analysis**: Utilizes simple audio analysis with Librosa (e.g., volume) to find the most energetic parts of the song.
 - **Strobe Effects**: Adds strobe effects that are synchronized with drum onsets (most effective with metal music).
 - **QLC+ Script Generation**: 
