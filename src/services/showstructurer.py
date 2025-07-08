@@ -37,7 +37,7 @@ class ShowStructurer:
         self.dimmer_update_fq = 15 # ms
         # I've observed that QLC+ scripts have compounding lag the longer
         # the script gets, so I add an adjustment to combat this
-        self.wait_adjustment = 0.9
+        self.wait_adjustment = 0.09
         self.pause_wait_adjustment = 0.02
 
         #Delay for powershell script
