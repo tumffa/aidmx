@@ -34,5 +34,12 @@ class CommandHandler:
             self.queuemanager.analyze_data(name)
         elif command[0] == "info":
             self.info()
+        elif command[0] == "merge":
+            name = command[1]
+            folder = command[2]
+            self.queuemanager.merge_shows(name, folder)
+        elif command[0] == "folder":
+            folder = command[1]
+            self.queuemanager.concurrent_analyze(folder)
         else:
             print("Invalid command")

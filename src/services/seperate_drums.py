@@ -4,12 +4,12 @@ import shutil
 import time
 import glob
 import numpy as np
-import scipy.io.wavfile as wav
 import librosa
 
 def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, device="cuda"):
     """
     Separates drum components using LarsNet with a local conda environment.
+    First checks if separation has already been performed.
     
     Args:
         drum_audio_path (str): Path to the drums audio file.
@@ -18,9 +18,71 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
         device (str): Device to use for inference (default: "cuda").
         
     Returns:
-        tuple: (waveform, sample_rate) for the combined drums
+        tuple: Dictionary of waveforms and sample rate for the drum components
     """
-    print(f"Separating drum components using LarsNet on {device}...")
+    print(f"Processing drum components using LarsNet...")
+    
+    # Get the base name of the file without extension for subdirectory
+    base_name = os.path.splitext(os.path.basename(drum_audio_path))[0]
+    
+    # Create a subdirectory for this song's outputs
+    song_output_dir = os.path.join(output_dir, base_name)
+    os.makedirs(song_output_dir, exist_ok=True)
+    seperate_path = f"{output_dir}/drums"
+    
+    # Check if components already exist in the htdemucs structure
+    if os.path.exists(seperate_path):
+        print(f"Found potential existing separation in {seperate_path}, checking components...")
+        
+        component_paths = {}
+        required_components = ['kick', 'snare', 'toms']
+        all_components = required_components
+        
+        # Check if all required components exist
+        all_required_exist = True
+        
+        for component in all_components:
+            component_path = os.path.join(seperate_path, component, "drums.wav")
+            if os.path.exists(component_path):
+                component_paths[component] = component_path
+                print(f"Found existing {component} component at {component_path}")
+            elif component in required_components:
+                all_required_exist = False
+                print(f"Missing required {component} component")
+        
+        # If all required components exist, load them and skip separation
+        if all_required_exist and len(component_paths) >= 2:
+            print("Found all required pre-separated components, skipping separation process")
+            
+            output = {}
+            sr = None
+            max_length = 0
+            
+            # First pass: load audio and determine max length and sample rate
+            for component, path in component_paths.items():
+                audio, sample_rate = librosa.load(path, sr=None, mono=True)
+                output[component] = audio
+                
+                if sr is None:
+                    sr = sample_rate
+                elif sr != sample_rate:
+                    print(f"Warning: {component} has different sample rate ({sample_rate} vs {sr})")
+                    # Will need to resample
+                
+                max_length = max(max_length, len(audio))
+            
+            # Second pass: resample and pad if needed
+            for component in component_paths.keys():
+                # Resample if needed
+                if len(output[component]) != max_length:
+                    output[component] = np.pad(output[component], 
+                                             (0, max_length - len(output[component])), 
+                                             mode='constant')
+            
+            print(f"Successfully loaded pre-separated components with sr={sr}")
+            return output, sr
+    
+    print(f"Pre-separated components not found or incomplete, performing separation...")
     
     # Determine LarsNet path
     larsnet_paths = [
@@ -39,12 +101,6 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
     if not larsnet_dir:
         raise FileNotFoundError("Could not find LarsNet directory with separate.py")
     
-    # Get the base name of the file without extension for subdirectory
-    base_name = os.path.splitext(os.path.basename(drum_audio_path))[0]
-    
-    # Create a subdirectory for this song's outputs
-    song_output_dir = os.path.join(output_dir, base_name)
-    os.makedirs(song_output_dir, exist_ok=True)
     print(f"Created output directory for this song: {song_output_dir}")
     
     # Check for conda environment in the LarsNet directory
@@ -78,7 +134,7 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
             "conda", "run", "--prefix", env_dir,
             "python", separate_script,
             "-i", temp_input_dir,
-            "-o", song_output_dir,  # Use the song-specific output directory
+            "-o", song_output_dir,
             "-d", device
         ]
     else:
@@ -87,7 +143,7 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
             "cd", larsnet_dir, "&&",
             "python", "separate.py",
             "-i", os.path.abspath(temp_input_dir),
-            "-o", os.path.abspath(song_output_dir),  # Use the song-specific output directory
+            "-o", os.path.abspath(song_output_dir),
             "-d", device
         ]
     
@@ -158,7 +214,7 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
             # Fall back to original drums audio
             audio, sr = librosa.load(drum_audio_path, sr=None, mono=True)
             print(f"Using original drums as fallback: shape={audio.shape}, sr={sr}")
-            return audio, sr
+            return {'full_drums': audio}, sr
             
         # Load kick and snare using librosa to handle various audio formats
         kick_audio, kick_sr = librosa.load(output_paths['kick'], sr=None, mono=True)
@@ -194,15 +250,20 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
                     toms_audio = toms_audio[:max_length]
             except Exception as e:
                 print(f"Error loading toms audio: {e}. Continuing without toms.")
-
-        # Resample
         
-
+        # Prepare output dictionary
         output = {}
         output['kick'] = kick_audio
         output['snare'] = snare_audio
         if 'toms' in output_paths:
             output['toms'] = toms_audio
+
+        # Clean up temporary input directory
+        if os.path.exists(temp_input_dir):
+            try:
+                shutil.rmtree(temp_input_dir)
+            except:
+                print(f"Warning: Failed to clean up temporary directory {temp_input_dir}")
 
         return output, sr
         
@@ -210,13 +271,16 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
         print(f"Error running LarsNet: {e}")
         # Clean up temporary input directory
         if os.path.exists(temp_input_dir):
-            shutil.rmtree(temp_input_dir)
+            try:
+                shutil.rmtree(temp_input_dir)
+            except:
+                pass
             
         # Fall back to original drums audio
         try:
             print("Using original drums as fallback due to error")
             audio, sr = librosa.load(drum_audio_path, sr=None, mono=True)
-            return audio, sr
+            return {'full_drums': audio}, sr
         except:
             print("Failed to load original drums. Returning empty audio.")
-            return np.zeros(1000), 22050
+            return {'full_drums': np.zeros(1000)}, 22050

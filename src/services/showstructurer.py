@@ -37,8 +37,11 @@ class ShowStructurer:
         self.dimmer_update_fq = 15 # ms
         # I've observed that QLC+ scripts have compounding lag the longer
         # the script gets, so I add an adjustment to combat this
-        self.wait_adjustment = 0.08
+        self.wait_adjustment = 0.9
         self.pause_wait_adjustment = 0.02
+
+        #Delay for powershell script
+        self.powershell_delay = 300
 
     def adjusted_wait(self, time, is_pause=False):
         if is_pause:
@@ -543,7 +546,7 @@ class ShowStructurer:
         result["queue"] = pulse_queue
         return result
     
-    def fastpulse(self, name, show, intervalmod=4, dimmer1=255, dimmer2=0, color1="all", color2=None, length=30000.0, start=0, queuename="fastpulse0"):
+    def fastpulse(self, name, show, intervalmod=4, dimmer1=255, dimmer2=10, color1="all", length=30000.0, start=0, queuename="fastpulse0"):
         result = {}
         fastpulse_queue = Queue()
         result["name"] = queuename
@@ -558,7 +561,7 @@ class ShowStructurer:
         if color1 == "all":
             colors = ["red", "green", "blue", "pink", "yellow", "cyan", "orange", "purple"]
         else:
-            colors = [color1]
+            colors = color1
         last_color = None
         while time > 1:
             temp = []
@@ -1591,22 +1594,66 @@ class ShowStructurer:
         
         return processed_ranges
 
-    def generate_show(self, name, qxw, strobes=True):
+    def generate_show(self, name, qxw, strobes=False, delay=None):
         """
             Generates all functions, buttons, etc. for a QLC+ file. 
         Args:
             name (str): Name of the show to generate
             qxw (Object): object that handles qlc+ file generation 
-            strobes (bool, optional): Whether or not to include strobe effects. Defaults to True.
+            strobes (bool, optional): Whether or not to include strobe effects. Defaults to False.
         """
         # delay for powershell command to sync song and lightshow start
-        delay = 760 # milliseconds
         qxw.create_copy(name) # creates a new file based off of preexisting fixture template
         scripts = [] # list to hold all of the scripts for file
         function_names = [] # list that holds names of beforementioned scripts
         show = self.create_show(name) # holds information about song
         sections = show.struct["chorus_sections"] # energetic segments of the song
         segments = show.struct["segments"] # segments of the song
+
+        # choose primary chasers and colours - select JUST ONE primary chaser for the whole song
+        strong_chasers = ["FastPulse", "SideToSide", "ColorPulse"]
+        idle_chasers = ["SimpleColor"]
+        primary_chaser = random.choice(strong_chasers)  # Select ONE primary chaser for all energetic segments
+        secondary_chaser = random.choice(idle_chasers)
+        
+        # Choose colors with same logic as before
+        colours = ["red", "green", "blue", "pink", "yellow", "cyan", "orange", "purple"]
+        
+        # Define which colors are visually similar to avoid selecting them together
+        close_colors = {
+            "red": ["pink", "orange"],
+            "green": ["yellow", "cyan"],
+            "blue": ["purple", "cyan"],
+            "pink": ["red", "purple"],
+            "yellow": ["green", "orange"],
+            "cyan": ["green", "blue"],
+            "orange": ["red", "yellow"],
+            "purple": ["blue", "pink"]
+        }
+        
+        # Choose first primary color randomly
+        primary_color1 = random.choice(colours)
+        
+        # Choose second primary color that isn't close to the first
+        available_colors = [c for c in colours if c != primary_color1 and c not in close_colors[primary_color1]]
+        primary_color2 = random.choice(available_colors)
+        
+        # Primary colors for the energetic chaser
+        primary_colours = [primary_color1, primary_color2]
+        
+        # Choose idle color that isn't close to either primary color
+        idle_color_options = [c for c in colours if c not in primary_colours 
+                        and c not in close_colors[primary_color1]
+                        and c not in close_colors[primary_color2]]
+        
+        # If no "distant" colors left, just pick one that's not already used
+        if not idle_color_options:
+            idle_color_options = [c for c in colours if c not in primary_colours]
+        
+        idle_colour = random.choice(idle_color_options)
+        
+        if delay is None:
+            delay = self.powershell_delay
         
         # Add premade chasers to use with virtual console
         self.add_chasers(name, show, qxw)
@@ -1639,8 +1686,6 @@ class ShowStructurer:
         onefocus = False
         if len(show.struct["focus"]) == 1:
             onefocus = True
-        lastchaser = random.choice(["FastPulse", "SideToSide"])
-        lastidle = random.choice(["Pulse", "SlowFlash"])
 
         for i in range(i, len(segments)):
             start_time = segments[i]["start"]*1000 + delay
@@ -1652,81 +1697,56 @@ class ShowStructurer:
                 if segments[i]["start"] == section["seg_start"]:
                     found = True
                     length = (segments[i]["end"] - segments[i]["start"])*1000
-                    types = ["alternate", "side_to_side"]
-                    last_choice = None
-                    queues.append(self.color_pulse(
-                        name, show, color1="red", color2="blue", dimmer=255,
-                        length=length, start=start_time, queuename=f"colorpulse{i}"))
-                    # if segments[i]["label"] == show.struct["focus"]["first"]:
-                    #     if onefocus == False:
-                    #         queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
-                    #     elif lastchaser == "FastPulse" and "abovewash" in self.universe:
-                    #         if subsegment:
-                    #             queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
-                    #             if "abovewash" in self.universe:
-                    #                 queues.append(self.alternate_flood(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
-                    #             lastchaser = "FastPulse"
-                    #         else:
-                    #             queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
-                    #             lastchaser = "SideToSide"
-                    #     elif lastchaser == "SideToSide" or "abovewash" not in self.universe:
-                    #         if subsegment:
-                    #             queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
-                    #             lastchaser = "SideToSide"
-                    #         else:
-                    #             queues.append(self.fastpulse(name, show=show, length=length, start=start_time, queuename=f"fastpulse{i}"))
-                    #             if "abovewash" in self.universe:
-                    #                 queues.append(self.alternate_flood(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
-                    #             lastchaser = "FastPulse"
-                    #     print(f"Print added energetic {lastchaser} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
-                    # else:
-                    #     type = random.choice(types)
-                    #     while type == last_choice:
-                    #         type = random.choice(types)
-                    #     last_choice = type
-                    #     if "abovewash" not in self.universe:
-                    #         type = "alternate"
-                    #     if type == "alternate":
-                    #         queues.append(self.alternate(name, show=show, length=length, start=start_time, queuename=f"alternateflood{i}"))
-                    #     else:
-                    #         queues.append(self.side_to_side(name, show=show, length=length, start=start_time, queuename=f"sidetoside{i}"))
-                    #     print(f"Print added normal {last_choice} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
+                    
+                    # Use the single primary chaser for all energetic segments
+                    current_chaser = primary_chaser
+                    is_focus_segment = segments[i]["label"] == show.struct["focus"]["first"]
+                    
+                    # Override chaser selection for focus segments if needed
+                    if not onefocus and is_focus_segment and current_chaser == "ColorPulse":
+                        # If it's a focus segment and onefocus is False, don't use ColorPulse
+                        current_chaser = random.choice(["FastPulse", "SideToSide"])
+                    
+                    print(f"Using {current_chaser} for segment {i} ({segments[i]['start']}s - {segments[i]['end']}s) {'FOCUS' if is_focus_segment else ''}")
+                    
+                    # Apply the selected chaser
+                    if current_chaser == "ColorPulse":
+                        queues.append(self.color_pulse(
+                            name, show, color1=primary_color1, color2=primary_color2, dimmer=255,
+                            length=length, start=start_time, queuename=f"colorpulse{i}"))
+                    elif current_chaser == "FastPulse":
+                        queues.append(self.fastpulse(
+                            name, show, color1=[primary_color1, primary_color2],
+                            length=length, start=start_time, queuename=f"fastpulse{i}"))
+                    elif current_chaser == "SideToSide":
+                        queues.append(self.side_to_side(
+                            name, show, color1=primary_color1, color2=primary_color2,
+                            length=length, start=start_time, queuename=f"sidetoside{i}"))
                     break
 
-            if found == False:
+            if not found:
                 length = (segments[i]["end"] - segments[i]["start"])*1000
                 queues.append(self.simple_color(
-                name, show, dimmer=255, length=(segments[i]["end"] - segments[i]["start"])*1000, start=start_time, queuename=f"color{i}"))
-                # # queues.append(self.idle(name, show=show, length=length, start=start_time, queuename=f"idle{i}"))
-                # if segments[i-1]["label"] == segments[i]["label"]:
-                #     if lastidle == "Pulse" and "abovewash" in self.universe:
-                #         queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
-                #         lastidle = "Pulse"
-                #     else:
-                #         queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
-                #         lastidle = "SlowFlash"
-                # else:
-                #     if lastidle == "Pulse" or "abovewash" not in self.universe:
-                #         queues.append(self.slow_flash(name, show=show, length=length, start=start_time, queuename=f"slowflash{i}"))
-                #         lastidle = "SlowFlash"
-                #     elif "abovewash" in self.universe:
-                #         queues.append(self.pulse(name, show=show, dimmer1=100, dimmer2=30, length=length, start=start_time, color1="green", color2="red", queuename=f"pulse{i}"))
-                #         lastidle = "Pulse"
-            print(f"Print added idle {lastidle} chaser ({segments[i]['start']}s - {segments[i]['end']}s) for {segments[i]['label']}")
+                    name, show, color=idle_colour, dimmer=255, length=length, 
+                    start=start_time, queuename=f"color{i}"))
 
             end_time = segments[i]["end"]*1000 + delay
+
+            if strobes and onset_parts:
+                strobe_ranges = self.preprocess_onset_ranges(segments[i]["start"], segments[i]["end"], onset_parts)
             light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]
             segment_queue, segment_dimmers = self.combine(
                 queues,
                 end_time=end_time,
                 light_strength_envelope=light_strength_envelope,
-                strobe_ranges=self.preprocess_onset_ranges(segments[i]["start"], segments[i]["end"], onset_parts)
+                strobe_ranges=strobe_ranges if strobes else None,
             )
             scripts.append(segment_queue)
             scripts.append(segment_dimmers)
             function_names.append(str(segments[i]["start"]))
             function_names.append(str(segments[i]["start"]) + "_dimmers")
             i += 1
+        
         qxw.add_track(scripts, name, function_names)
 
     def add_chasers(self, name, show, handler):

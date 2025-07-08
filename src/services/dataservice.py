@@ -161,6 +161,16 @@ class DataManager:
         with open(self.struct_path / f"{name}.json", 'r') as f:
             struct_data = json.load(f)
         return struct_data.get(key)
+    
+    def get_song_length(self, name):
+        # Get the length of the song in milliseconds
+        song = self.get_song(name)
+        if not song:
+            print(f"Song {name} not found in data.")
+            return 0
+        filepath = song["file"]
+        audio = AudioSegment.from_file(filepath)
+        return len(audio)
 
     def get_data(self, name):
         data = {}

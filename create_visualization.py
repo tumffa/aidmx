@@ -69,6 +69,10 @@ def visualize_segments(json_path, audio_path, output_path="output_visualization.
     envelope_line_thickness = 2
     
     # Create frames for each time point
+    # Add a debug counter for segments with envelopes
+    segments_with_envelope = 0
+    
+    # Create frames for each time point
     print(f"Generating {total_frames} frames...")
     for frame_idx in range(total_frames):
         current_time = frame_idx / fps
@@ -253,6 +257,11 @@ def visualize_segments(json_path, audio_path, output_path="output_visualization.
                     envelope_data = drum_data["light_strength_envelope"]
                     envelope_times = envelope_data.get("times", [])
                     envelope_values = envelope_data.get("values", [])
+                    segment_start = current_segment["start"]  # Get segment start time
+                    
+                    # Debug count on first frame only
+                    if frame_idx == 0 or (frame_idx > 0 and segments[segments.index(current_segment)-1] != current_segment):
+                        segments_with_envelope += 1
                     
                     if envelope_times and envelope_values:
                         # Draw envelope area border
@@ -286,9 +295,12 @@ def visualize_segments(json_path, audio_path, output_path="output_visualization.
                         # Find the values visible in the current window
                         visible_points = []
                         for i, t in enumerate(envelope_times):
-                            if current_time - 2 <= t <= current_time + 2 and i < len(envelope_values):
+                            # IMPORTANT FIX: Add segment_start to the relative time from the envelope
+                            absolute_time = t + segment_start
+                            
+                            if current_time - 2 <= absolute_time <= current_time + 2 and i < len(envelope_values):
                                 # Calculate x position based on time
-                                x_pos = int(width/2 + (t - current_time) * width/4)
+                                x_pos = int(width/2 + (absolute_time - current_time) * width/4)
                                 if 0 <= x_pos < width:
                                     # Calculate y position based on strength value
                                     strength = envelope_values[i]
@@ -491,9 +503,9 @@ def visualize_segments(json_path, audio_path, output_path="output_visualization.
     
 if __name__ == "__main__":
     path = Path(os.getcwd())
-    song = "close" # enter the song name here
-    JSON_PATH = path / f"aidmx/struct/{song}.json"
-    AUDIO_PATH = path / f"aidmx/data/songs/{song}.wav"
-    OUTPUT_PATH = path / f"aidmx/{song}_visualization.mp4"
+    song = "kukakaskee" # enter the song name here
+    JSON_PATH = path / f"struct/{song}.json"
+    AUDIO_PATH = path / f"data/songs/{song}.wav"
+    OUTPUT_PATH = path / f"{song}_visualization.mp4"
     
     visualize_segments(JSON_PATH, AUDIO_PATH, OUTPUT_PATH)
