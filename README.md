@@ -3,13 +3,15 @@
 This project takes an MP3 file and generates a synchronized light show script for QLC+ based on the audio.
 
 ## Dependencies
-Making installation easy is still work in progress :)
+Easier installation is still work in progress :)
 
 1. Initialize conda environment from environment.yml.
 
-2. Install **allin1**: https://github.com/mir-aidj/all-in-one?tab=readme-ov-file
+2. [Download](https://drive.google.com/uc?id=1U8-5924B1ii1cjv9p0MTPzayb00P4qoL&export=download) the LarsNet models, unzip the folder, and place it into `src/services/larsnet/inference_models`.
 
-3. Rest of dependencies:
+3. Install **allin1**: https://github.com/mir-aidj/all-in-one?tab=readme-ov-file
+
+4. Rest of dependencies:
 ```
 pip install -r requirements.txt
 ```
