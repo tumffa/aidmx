@@ -41,7 +41,7 @@ class ShowStructurer:
         self.pause_wait_adjustment = 0.02
 
         #Delay for powershell script
-        self.powershell_delay = 300
+        self.powershell_delay = 500
 
     def adjusted_wait(self, time, is_pause=False):
         if is_pause:
@@ -588,7 +588,7 @@ class ShowStructurer:
         result["queue"] = fastpulse_queue
         return result
     
-    def side_to_side(self, name, show, intervalmod=4, dimmer1=255, dimmer2=25, color1="random", color2=None, length=30000.0, start=0, queuename="sidetoside0"):
+    def side_to_side(self, name, show, intervalmod=4, dimmer1=255, dimmer2=255, color1="random", color2=None, length=30000.0, start=0, queuename="sidetoside0"):
         result = {}
         sidetoside_queue = Queue()
         result["name"] = queuename
@@ -1621,14 +1621,14 @@ class ShowStructurer:
         
         # Define which colors are visually similar to avoid selecting them together
         close_colors = {
-            "red": ["pink", "orange"],
-            "green": ["yellow", "cyan"],
             "blue": ["purple", "cyan"],
-            "pink": ["red", "purple"],
-            "yellow": ["green", "orange"],
-            "cyan": ["green", "blue"],
-            "orange": ["red", "yellow"],
-            "purple": ["blue", "pink"]
+            "pink": ["purple"],
+            "yellow": ["orange"],
+            "cyan": ["blue"],
+            "orange": ["yellow"],
+            "purple": ["blue", "pink"],
+            "red": [],
+            "green": []
         }
         
         # Choose first primary color randomly

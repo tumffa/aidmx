@@ -6,6 +6,7 @@ from pathlib import Path
 from pydub import AudioSegment
 from typing import Union, List
 from services import audio_analyzer
+from dataclasses import asdict, is_dataclass
 
 
 class DataManager:
@@ -67,7 +68,7 @@ class DataManager:
         try:
             if not path.exists():
                 analyzed = allin1.analyze(Path(filepath))
-                allin1.helpers.save_results(analyzed, self.struct_path, audio_name)
+                self.save_results(analyzed, self.struct_path, audio_name)
             else:
                 print("Allin1 analysis already exists")
         except Exception as e:
@@ -176,3 +177,58 @@ class DataManager:
         data = {}
         data["struct"] = self.get_struct_data(name)
         return data
+    
+    def save_results(self,
+        results: Union[dict, List[dict]],
+        out_dir: Path,
+        name: str,
+        indent: int = 2
+        ):
+        """
+        Save AllIn1 analysis results to out_dir/<name>.json and associated
+        activations/embeddings files if present.
+        Modified version of allin1.helpers.save_results
+        """
+        if not isinstance(results, list):
+            results = [results]
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        for result in results:
+            try:
+                if is_dataclass(result):
+                    result_dict = asdict(result)
+                elif isinstance(result, dict):
+                    result_dict = dict(result)
+                else:
+                    result_dict = dict(result.__dict__) if hasattr(result, "__dict__") else dict(result)
+            except Exception:
+                result_dict = {}
+
+            activations = None
+            embeddings = None
+            if "activations" in result_dict:
+                activations = result_dict.pop("activations")
+            elif hasattr(result, "activations"):
+                activations = getattr(result, "activations", None)
+
+            if "embeddings" in result_dict:
+                embeddings = result_dict.pop("embeddings")
+            elif hasattr(result, "embeddings"):
+                embeddings = getattr(result, "embeddings", None)
+
+            if activations is not None:
+                try:
+                    np.savez(str(out_dir / f"{name}.activ.npz"), **activations)
+                except Exception:
+                    pass
+
+            if embeddings is not None:
+                try:
+                    np.save(str(out_dir / f"{name}.embed.npy"), embeddings)
+                except Exception:
+                    pass
+
+            result_dict["path"] = str(name)
+            json_str = json.dumps(result_dict, indent=indent)
+            (out_dir / f"{name}.json").write_text(json_str)
