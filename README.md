@@ -35,11 +35,56 @@ DM on discord if you have questions @ ```_tume_```
       "data_path": "./data",
       "struct_path": "./struct",
       "demix_path": "./demix",
-      "setup_path": "./data/Newsetup.qxw", # Your template QLC+ file. The fixtures need to match self.universe of ShowStructurer in showstructurer.py.
-      "win_app_path": "/wsl.localhost/Ubuntu-22.04/home/tumffa", # Folder where /aidmx is. This is used for AIQLCshows/play_song.bat Windows script to sync song, not necessary
+      "setup_path": "./data/Newsetup.qxw", # Your template QLC+ file
+      "win_app_path": "/wsl.localhost/Ubuntu-22.04/home/tumffa", # Project folder. This is used for AIQLCshows/play_song.bat Windows script to sync song, not necessary
       "program_data_path": "/mnt/c/ProgramData" # Specify the folder where setup.py will create AIQLCshows folder for generated shows and play_song.bat script will reside.
     }
    ```
 4. Copy your template `.qxw` file into `./data` directory.
 
 5. Run `setup.py`. This will create the necessary folders, etc.
+
+## Universe setup and usage
+
+### Universe setup
+Configure `universe` in `config.json` to match the configuration in your template `.qxw` file. The chasers that are implemented are mostly based on just a row of washers such as this. Use the `abovewash` -key for such setup.
+  ```
+  "universe": {
+    "abovewash": {
+      "1": {"id": 1, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
+                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+      "2": {"id": 2, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
+                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+      "3": {"id": 3, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
+                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+      "4": {"id": 4, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
+                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250}
+    }
+  ```
+**Meanings of keys:**
+- **"id"**: QLC fixture ID, these should be in physical order
+- **"dimmer"**: QLC channel for dimmer
+- **"colortype"**: "seperate" for different RGB channels, single channel not supported right now
+- **"colorchannels"**: channels for red, green, blue if colortype is seperate
+- **"strobe"**: QLC channel for strobe
+- **"stroberange"**: range of strobe values that produce a strobe effect
+- **"shutter"**: QLC channel for shutter
+- **"shutters"**: possible shutter values, "open" is required, "closed" is optional
+- **"nicestrobe"**: a strobe value for strobe channel that produces a nice strobe effect
+
+### Usage
+**To generate QLC+ show**, first move the desired `.mp3` / `.wav` file into `./data/songs`.
+
+Then, in the main directory, run:
+
+  ```
+  python3 generate_show.py song_name [--strobe] [--simple] [--delay=ms]
+  ```
+- `--strobe` can be used to turn strobes effects on
+- `--simple` can be used to limit the energetic chasers to `color_pulse`, which is good if you're running only a couple fixtures.
+- `--delay=ms` can be used to define a delay before the start of the QLC+ show. Default is 500ms, if you want to use the PowerShell script.
+
+Alternatively, for more options through the command-line interface, run:
+  ```
+  python3 src/main.py
+  ```
