@@ -29,19 +29,19 @@ def analyze_drum_patterns(demix_path, beats=None, segments=None):
     kick_path = os.path.join(demix_path, "drums", "kick", "drums.wav")
     snare_path = os.path.join(demix_path, "drums", "snare", "drums.wav")
     
-    print(f"----Calculating dimmer scaling function - loading demixed drum tracks from {demix_path}")
+    print(f"--------Calculating dimmer scaling function - loading demixed drum tracks from {demix_path}")
     try:
         kick_audio, sr_kick = librosa.load(kick_path, sr=sr, mono=True)
-        print(f"------Found kick at {kick_path}")
+        print(f"----------Found kick at {kick_path}")
     except Exception as e:
-        print(f"------Error loading kick track: {e}")
+        print(f"----------Error loading kick track: {e}")
         kick_audio = np.zeros(1000)  # Fallback empty audio
     
     try:
         snare_audio, sr_snare = librosa.load(snare_path, sr=sr, mono=True)
-        print(f"------Found snare at {snare_path}")
+        print(f"----------Found snare at {snare_path}")
     except Exception as e:
-        print(f"------Error loading snare track: {e}")
+        print(f"----------Error loading snare track: {e}")
         snare_audio = np.zeros(1000)  # Fallback empty audio
 
     # Normalize audio
@@ -111,7 +111,7 @@ def analyze_drum_patterns(demix_path, beats=None, segments=None):
         segment["drum_analysis"]["light_strength_envelope"] = light_envelope
 
 
-    print(f"----Calculated dimmer scaling function for {len(segments)} segments ({segments[0]['start']:.2f}s to {segments[-1]['end']:.2f}s)")
+    print(f"--------Calculated dimmer scaling function for {len(segments)} segments ({segments[0]['start']:.2f}s to {segments[-1]['end']:.2f}s)")
 
     return segments
     

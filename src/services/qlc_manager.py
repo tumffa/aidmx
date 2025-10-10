@@ -265,7 +265,7 @@ class QLCManager:
         # Create the script line
         program_data_path = get_config("program_data_path")
         program_data_path = to_windows_path(program_data_path)
-        script_line = f'systemcommand:"{program_data_path}\\AIQLCshows\\play_song.bat" arg:{filename}'
+        script_line = f'systemcommand:"{program_data_path}\\AIQLCshows\\play_song_modified.bat" arg:{filename}'
         return script_line
 
     def merge_shows(self, target_showname, source_shows, max_workers=4):

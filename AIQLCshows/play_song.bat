@@ -12,7 +12,7 @@ REM Set the song name
 set "songName=%~1"
 
 REM Start playing the song using PowerShell in a separate process
-start powershell -Command "(New-Object System.Media.SoundPlayer 'APP_PATH\\aidmx\\data\\songs\\%songName%').PlaySync()"
+start powershell -Command "(New-Object System.Media.SoundPlayer 'APP_PATH\\data\\songs\\%songName%').PlaySync()"
 
 REM Wait for user input to exit
 echo Press Ctrl+C to stop playing the song.
