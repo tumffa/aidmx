@@ -494,35 +494,49 @@ class ShowStructurer:
         result["queue"] = alternateflood_queue
         return result
 
-    def pulse(self, name, show, intervalmod=1, dimmer1=255, dimmer2=50, color1="white", color2="white", length=30000.0, start=0, queuename="pulse0"):
-        result = {}
-        pulse_queue = Queue()
+    def pulse(self, name, show, intervalmod=1, dimmer1=255, dimmer2=50, color1="yellow", color2="red", length=30000.0, start=0, queuename="pulse0"):
+        result = {} # Dictionary to hold the result: name and queue of commands
+        pulse_queue = Queue() # Queue for wait times and commands, which alternate after another.
+        # The wait time is an integer and the commands are a list of QLC+ script lines
         result["name"] = queuename
-        pulse_queue.enqueue(start)
+        pulse_queue.enqueue(start) # The first item in the queue is always the time till chaser begins 
         self.shows[name] = show
-        group = self.universe["abovewash"]
-        time = length
-        switchinterval = (show.beatinterval/len(group))*1000*4/intervalmod
-        i = 1
+        group = self.universe["abovewash"] # Define the group of fixtures to use
+        time = length # Total time the effect will run for
+
+        # This example sets up a chaser that moves bright color2 to the next fixture every beat
+        switchinterval = (show.beatinterval/len(group))*1000*4/intervalmod # Time between switching to the next fixture
+        i = 1 # Start with the first fixture
         while time > 1:
-            temp = []
+            temp = [] # set up a list to hold the commands for this time frame before next wait
             for fixture in group.values():
+                # Set fixture to default color
                 color_commands = self.calculate_colors(fixture, color1)
+                # Add color commands to list
                 temp += color_commands
+                # Make sure the shutters are open
                 temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
+                # Set the dimmer to dimmer2 (lower brightness)
                 temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer2, f"Dimmer reset"))
+            # Set fixture i to color2
             color_commands = self.calculate_colors(group[str(i)], color2)
-            temp.append(self._setfixture(group[str(i)]["id"], group[str(i)]["dimmer"], dimmer1, "Dimmer off"))
             temp += color_commands
+            # Set fixture i to dimmer1 (higher brightness)
+            temp.append(self._setfixture(group[str(i)]["id"], group[str(i)]["dimmer"], dimmer1, "Dimmer off"))
+
+            # Decrease the remaining time by the switch interval
             if time - switchinterval < 0:
                 switchinterval = time
             time -= switchinterval
+            # Move i to the next fixture
             i += 1
             if i > len(group):
                 i = 1
+            # If there is still time left, enqueue the commands list followed by wait time
             if time > 1:
                 pulse_queue.enqueue(temp)
                 pulse_queue.enqueue(switchinterval)
+        # Append the queue to result
         result["queue"] = pulse_queue
         return result
     
@@ -1666,13 +1680,14 @@ class ShowStructurer:
 
         for i in range(i, len(segments)):
             start_time = segments[i]["start"]*1000 + delay
+            end_time = segments[i]["end"]*1000 + delay
+            length = (segments[i]["end"] - segments[i]["start"])*1000
             queues = []
             found = False
 
             for section in sections:
                 if segments[i]["start"] == section["seg_start"]:
                     found = True
-                    length = (segments[i]["end"] - segments[i]["start"])*1000
                     
                     # Use the single primary chaser for all energetic segments
                     current_chaser = primary_chaser
@@ -1699,12 +1714,9 @@ class ShowStructurer:
                     break
 
             if not found:
-                length = (segments[i]["end"] - segments[i]["start"])*1000
                 queues.append(self.simple_color(
                     name, show, color=idle_colour, dimmer=255, length=length, 
                     start=start_time, queuename=f"color{i}"))
-
-            end_time = segments[i]["end"]*1000 + delay
 
             if strobes and onset_parts:
                 strobe_ranges = self.preprocess_onset_ranges(segments[i]["start"], segments[i]["end"], onset_parts)
@@ -1721,7 +1733,7 @@ class ShowStructurer:
             function_names.append(str(segments[i]["start"]) + "_dimmers")
             i += 1
         
-        return scripts, function_names,
+        return scripts, function_names
 
     def add_chasers(self, name, show, handler):
         handler.add_button(name, "BLACKOUT", "blackout", 1)
