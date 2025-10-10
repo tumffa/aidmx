@@ -18,6 +18,15 @@ class ShowStructurer:
             "4": {"id": 4, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
                     "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250}
         }
+        # "id": QLC fixture ID, these should be in physical order
+        # "dimmer": QLC channel for dimmer
+        # "colortype": "seperate" for different RGB channels, single channel not supported right now
+        # "colorchannels": channels for red, green, blue if colortype is seperate
+        # "strobe": QLC channel for strobe
+        # "stroberange": range of strobe values that produce a strobe effect
+        # "shutter": QLC channel for shutter
+        # "shutters": possible shutter values, "open" is required, "closed" is optional
+        # "nicestrobe": a strobe value for strobe channel that produces a nice strobe effect
 
         self.universe["strobe"] = {
             "1": {"id": 0, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": (130, 249),
@@ -37,11 +46,8 @@ class ShowStructurer:
         self.dimmer_update_fq = 15 # ms
         # I've observed that QLC+ scripts have compounding lag the longer
         # the script gets, so I add an adjustment to combat this
-        self.wait_adjustment = 0.09
+        self.wait_adjustment = 0.08
         self.pause_wait_adjustment = 0.02
-
-        #Delay for powershell script
-        self.powershell_delay = 500
 
     def adjusted_wait(self, time, is_pause=False):
         if is_pause:
@@ -1594,13 +1600,15 @@ class ShowStructurer:
         
         return processed_ranges
 
-    def generate_show(self, name, qxw, strobes=False, delay=None):
+    def generate_show(self, name, qxw, delay, strobes=False, simple=False):
         """
             Generates all functions, buttons, etc. for a QLC+ file. 
         Args:
             name (str): Name of the show to generate
             qxw (Object): object that handles qlc+ file generation 
             strobes (bool, optional): Whether or not to include strobe effects. Defaults to False.
+            delay (int, optional): Delay in milliseconds to sync lights with music. Defaults to 500
+            simple (bool, optional): Whether to use simple mode (only a simple color chaser). Defaults to False.
         """
         print(f"----Combining scripts for show")
         # delay for powershell command to sync song and lightshow start
@@ -1652,9 +1660,6 @@ class ShowStructurer:
         
         idle_colour = random.choice(idle_color_options)
         
-        if delay is None:
-            delay = self.powershell_delay
-        
         # Add premade chasers to use with virtual console
         self.add_chasers(name, show, qxw)
 
@@ -1683,15 +1688,12 @@ class ShowStructurer:
         i = 0
         if segments[0]["label"] == "start":
             i += 1
-        onefocus = False
-        if len(show.struct["focus"]) == 1:
-            onefocus = True
+        onefocus = (len(show.struct["focus"]) == 1) # check how many segments are energetic i.e. verse/chorus/inst
 
         for i in range(i, len(segments)):
             start_time = segments[i]["start"]*1000 + delay
             queues = []
             found = False
-            subsegment = segments[i].get("subsegment", False)
 
             for section in sections:
                 if segments[i]["start"] == section["seg_start"]:
@@ -1708,7 +1710,7 @@ class ShowStructurer:
                         current_chaser = random.choice(["FastPulse", "SideToSide"])
                     
                     # Apply the selected chaser
-                    if current_chaser == "ColorPulse":
+                    if current_chaser == "ColorPulse" or simple == True: # simple mode uses only ColorPulse chaser
                         queues.append(self.color_pulse(
                             name, show, color1=primary_color1, color2=primary_color2, dimmer=255,
                             length=length, start=start_time, queuename=f"colorpulse{i}"))

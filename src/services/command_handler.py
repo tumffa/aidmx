@@ -13,7 +13,7 @@ class CommandHandler:
 
     def info(self):
         print("Commands:")
-        print("analyze <audio_name> <Y/N>(strobes, default no) - Analyze a track")
+        print("analyze <audio_name> [--strobe] [--simple] [--delay=ms] - Analyze a single track. Use --simple if you, for instance, only have a couple lights")
         print("folder <queue_folder> - Analyze all tracks in a folder")
         print("merge <audio_name> <folder> - Merge shows in folder into single showfile playlist (can be out of sync slightly)")
         print("sync - run this if there are previously analyzed struct files")
@@ -23,9 +23,27 @@ class CommandHandler:
         command = command.split()
         if command[0] == "analyze":
             strobe = False
-            if len(command) == 3 and command[2].lower() == 'y':
-                strobe = True
-            self.queuemanager.analyze_file(command[1], None, strobe)
+            simple = False
+            name = None
+            delay = None
+            for arg in command[1:]:
+                if arg.lower() in ['--strobe', '-s', 'y']:
+                    strobe = True
+                elif arg.lower() in ['--simple', '-m']:
+                    simple = True
+                elif arg.lower().startswith('--delay='):
+                    try:
+                        delay = int(arg.split('=', 1)[1])
+                    except ValueError:
+                        print("Invalid delay value, must be an integer (milliseconds)")
+                        return
+                elif not name:
+                    name = arg
+            if not name:
+                print("Usage: analyze <audio_name> [--strobe] [--simple] [--delay=milliseconds]")
+                return
+            self.queuemanager.analyze_file(name, strobe, simple, delay)
+
         elif command[0] == "sync":
             self.queuemanager.sync_with_struct()
         elif command[0] == "analyzedata":

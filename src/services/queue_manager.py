@@ -1,6 +1,6 @@
 import os
-from .showstructurer import ShowStructurer
-from services import audio_analysis
+from src.services.showstructurer import ShowStructurer
+from src.services import audio_analysis
 
 class QueueManager:
     def __init__(self, setupfile, data_manager, qlc):
@@ -10,36 +10,36 @@ class QueueManager:
         self.qlc = qlc
         self.structurer = ShowStructurer(data_manager)
 
-    def analyze_file(self, audio_name, filepath=None, strobes=False):
+    def analyze_file(self, audio_name, delay=500, strobes=False, simple=False):
         """Starts the file analysis process and show generation process.
 
         Args:
             audio_name (str): The name of the audio file to analyze.
-            filepath (str, optional): The path to the audio file. If not provided, it will look for the file in the default paths.
             strobes (bool, optional): Whether to include strobes in the show generation. Defaults to False.
+            simple (bool, optional): Whether to use simple mode (only a simple color chaser). Defaults to False.
+            delay (int, optional): Delay in ms before show start to allow for i.e. song track command to begin. Defaults to 600.
         """
-        print(f"\nProcessing {audio_name} with strobes={strobes}")
+        print(f"\nProcessing {audio_name} with strobes={strobes}, simple={simple}, delay={delay}ms")
 
-        if not filepath:
-            # Check for both .mp3 and .wav files
-            mp3_path = "{}/songs/{}.mp3".format(self.dm.return_path("data"), audio_name)
-            wav_path = "{}/songs/{}.wav".format(self.dm.return_path("data"), audio_name)
-            
-            if os.path.exists(mp3_path):
-                filepath = mp3_path
-                print(f"Using default path: {filepath}")
-            elif os.path.exists(wav_path):
-                filepath = wav_path
-                print(f"Using default path: {filepath}")
-            else:
-                print(f"No file found for {audio_name} in default paths.")
-                return
+        # Check for both .mp3 and .wav files
+        mp3_path = "{}/songs/{}.mp3".format(self.dm.return_path("data"), audio_name)
+        wav_path = "{}/songs/{}.wav".format(self.dm.return_path("data"), audio_name)
+        
+        if os.path.exists(mp3_path):
+            filepath = mp3_path
+            print(f"Using default path: {filepath}")
+        elif os.path.exists(wav_path):
+            filepath = wav_path
+            print(f"Using default path: {filepath}")
+        else:
+            print(f"No file found for {audio_name} in default paths.")
+            return
     
         self.dm.extract_data(audio_name, os.path.abspath(filepath))
-        self.analyze_data(audio_name, strobes)
+        self.analyze_data(audio_name, delay, strobes, simple)
         print(f"Finished\n")
 
-    def analyze_data(self, audio_name, strobes=False):
+    def analyze_data(self, audio_name, delay=None, strobes=False, simple=False):
         print(f"--Analyzing data")
         struct_data = self.dm.get_struct_data(audio_name)
         params = audio_analysis.segment(audio_name, struct_data)
@@ -47,7 +47,7 @@ class QueueManager:
         
         print(f"--Generating show")
         self.qlc.create_copy(audio_name)
-        scripts, function_names = self.structurer.generate_show(audio_name, self.qlc, strobes)
+        scripts, function_names = self.structurer.generate_show(audio_name, self.qlc, delay=delay, strobes=strobes, simple=simple)
         self.qlc.add_track(scripts, audio_name, function_names)
     
     def sync_with_struct(self):

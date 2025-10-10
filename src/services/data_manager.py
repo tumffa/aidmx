@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 from pydub import AudioSegment
 from typing import Union, List
-from services import audio_analysis
+from src.services import audio_analysis
 from dataclasses import asdict, is_dataclass
 
 

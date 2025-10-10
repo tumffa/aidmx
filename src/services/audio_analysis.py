@@ -1,7 +1,7 @@
 import librosa
-from services import drum_analysis_strobes
-from services import drum_analysis_dimmer
-from services.seperate_drums_larsnet import separate_drums_with_larsnet
+from src.services import drum_analysis_strobes
+from src.services import drum_analysis_dimmer
+from src.services.seperate_drums_larsnet import separate_drums_with_larsnet
 
 
 def initialize_song_metrics(song_data, struct_data=None):
