@@ -35,8 +35,8 @@ DM on discord if you have questions @ ```_tume_```
       "data_path": "./data",
       "struct_path": "./struct",
       "demix_path": "./demix",
-      "setup_path": "./data/Newsetup.qxw", # Your template QLC+ file. The fixtures need to match self.universe of ShowStructurer in showstructurer.py.
-      "win_app_path": "/wsl.localhost/Ubuntu-22.04/home/tumffa", # Folder where /aidmx is. This is used for AIQLCshows/play_song.bat Windows script to sync song, not necessary
+      "setup_path": "./data/Newsetup.qxw", # Your template QLC+ file
+      "win_app_path": "/wsl.localhost/Ubuntu-22.04/home/tumffa", # Project folder. This is used for AIQLCshows/play_song.bat Windows script to sync song, not necessary
       "program_data_path": "/mnt/c/ProgramData" # Specify the folder where setup.py will create AIQLCshows folder for generated shows and play_song.bat script will reside.
     }
    ```
@@ -44,10 +44,10 @@ DM on discord if you have questions @ ```_tume_```
 
 5. Run `setup.py`. This will create the necessary folders, etc.
 
-## Setup and usage
+## Universe setup and usage
 
-### Setup
-Configure `universe` in `config.json` to match the configuration in your template `.qxw` file. The chasers that are implemented are mostly based on just a row of washers such as this. Use the `abovewash` -key for them.
+### Universe setup
+Configure `universe` in `config.json` to match the configuration in your template `.qxw` file. The chasers that are implemented are mostly based on just a row of washers such as this. Use the `abovewash` -key for such setup.
   ```
   "universe": {
     "abovewash": {
