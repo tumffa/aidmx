@@ -2,19 +2,14 @@
 
 This project takes an MP3 file and generates a synchronized light show script for QLC+ based on the audio.
 
-## Dependencies
-Easier installation is still work in progress :)
+## Installation
 
-1. Initialize conda environment from environment.yml.
-
+1. Install dependencies from requirements.txt. These dependencies are for Linux/WSL with an Nvidia GPU. For CPU and other configurations, tweak requirements.txt. See https://natten.org/install/ for more info.
+```
+pip3 install -r requirements.txt
+```
 2. [Download](https://drive.google.com/uc?id=1U8-5924B1ii1cjv9p0MTPzayb00P4qoL&export=download) the LarsNet models, unzip the folder, and place it into `src/services/larsnet/inference_models`.
 
-3. Install **allin1**: https://github.com/mir-aidj/all-in-one?tab=readme-ov-file
-
-4. Rest of dependencies:
-```
-pip install -r requirements.txt
-```
 
 ## Features
 - **BPM Prediction**: Uses models to estimate the BPM of the song.
