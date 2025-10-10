@@ -23,7 +23,7 @@ DM on discord if you have questions @ ```_tume_```
 
 ## Installation
 
-1. Install dependencies from requirements.txt. These dependencies are for `Linux/WSL` with an `Nvidia GPU`. For CPU and other configurations, tweak `requirements.txt`. See [Natten](https://natten.org/install/)  and [allin1](https://github.com/mir-aidj/all-in-one) for more info on how to tweak the installations.
+1. Install dependencies from `requirements.txt`. These dependencies are for `Linux/WSL` with an `Nvidia GPU`. For CPU and other configurations, tweak `requirements.txt`. See [Natten](https://natten.org/install/)  and [allin1](https://github.com/mir-aidj/all-in-one) for more info on how to tweak the installations.
     ```
     pip3 install -r requirements.txt
     ```
@@ -40,6 +40,6 @@ DM on discord if you have questions @ ```_tume_```
       "program_data_path": "/mnt/c/ProgramData" # Specify the folder where setup.py will create AIQLCshows folder for generated shows and play_song.bat script will reside.
     }
    ```
-4. Copy the template `.qxw` file into `./data` directory.
+4. Copy your template `.qxw` file into `./data` directory.
 
 5. Run `setup.py`. This will create the necessary folders, etc.
