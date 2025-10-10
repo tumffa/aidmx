@@ -30,7 +30,7 @@ DM on discord if you have questions @ ```_tume_```
 2. [Download](https://drive.google.com/uc?id=1U8-5924B1ii1cjv9p0MTPzayb00P4qoL&export=download) the `LarsNet` inference models, unzip the folder, and place it into `src/services/larsnet/inference_models`.
 
 3. Edit `config.json`:
-   ```
+   ```json
    {
       "data_path": "./data",
       "struct_path": "./struct",
@@ -48,7 +48,7 @@ DM on discord if you have questions @ ```_tume_```
 
 ### Universe setup
 Configure `universe` in `config.json` to match the configuration in your template `.qxw` file. The chasers that are implemented are mostly based on just a row of washers such as this. Use the `abovewash` -key for such setup.
-  ```
+  ```json
   "universe": {
     "abovewash": {
       "1": {"id": 1, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
@@ -88,3 +88,113 @@ Alternatively, for more options through the command-line interface, run:
   ```
   python3 src/main.py
   ```
+
+## Customization
+New chasers can be added by hardcoding them into `ShowStructurer` in `showstructurer.py`.
+The chaser should return a dictionary:
+  ```json
+  {
+    "name": "name of the chaser script",
+    "queue": "Queue() object"
+  }
+  ```
+The `Queue()` object should begin with an `integer` (initial wait time) and then alternate between `lists of QLC+ script lines` and wait time `integers`.
+The `combine` function will take any number of these chaser queue dictionaries and alter the wait times so that each chaser can run concurrently.
+It then combines them into a dimmer script and a script containing the other commands. Use `self._setfixture` to generate script lines. 
+For instance, to open shutters of fixture 1, use following:
+  ```python
+  fixture = self.universe["abovewash"]["1"]
+  command = self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters")
+  ```
+
+Here is an example of a chaser that moves a bright color2 to the next fixture every beat:
+  ```python
+    def pulse(self, name, show, intervalmod=1, dimmer1=255, dimmer2=50, color1="yellow", color2="red", length=30000.0, start=0, queuename="pulse0"):
+        result = {} # Dictionary to hold the result: name and queue of commands
+        pulse_queue = Queue() # Queue for wait times and commands, which alternate after another.
+        # The wait time is an integer and the commands are a list of QLC+ script lines
+        result["name"] = queuename
+        pulse_queue.enqueue(start) # The first item in the queue is always the time till chaser begins 
+        self.shows[name] = show
+        group = self.universe["abovewash"] # Define the group of fixtures to use
+        time = length # Total time the effect will run for
+
+        switchinterval = (show.beatinterval/len(group))*1000*4/intervalmod # Time between switching to the next fixture
+        i = 1 # Start with the first fixture
+        while time > 1:
+            temp = [] # set up a list to hold the commands for this time frame before next wait
+            for fixture in group.values():
+                # Set fixture to default color
+                color_commands = self.calculate_colors(fixture, color1)
+                # Add color commands to list
+                temp += color_commands
+                # Make sure the shutters are open
+                temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
+                # Set the dimmer to dimmer2 (lower brightness)
+                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer2, f"Dimmer reset"))
+            # Set fixture i to color2
+            color_commands = self.calculate_colors(group[str(i)], color2)
+            temp += color_commands
+            # Set fixture i to dimmer1 (higher brightness)
+            temp.append(self._setfixture(group[str(i)]["id"], group[str(i)]["dimmer"], dimmer1, "Dimmer off"))
+
+            # Decrease the remaining time by the switch interval
+            if time - switchinterval < 0:
+                switchinterval = time
+            time -= switchinterval
+            # Move i to the next fixture
+            i += 1
+            if i > len(group):
+                i = 1
+            # If there is still time left, enqueue the commands list followed by wait time
+            if time > 1:
+                pulse_queue.enqueue(temp)
+                pulse_queue.enqueue(switchinterval)
+        # Append the queue to result
+        result["queue"] = pulse_queue
+        return result
+  ```
+
+**To change the logic of how chasers are selected**, edit `generate_show` in `showstructurer.py`:
+
+```python
+for i in range(i, len(segments)):
+    start_time = segments[i]["start"]*1000 + delay
+    end_time = segments[i]["end"]*1000 + delay
+    length = (segments[i]["end"] - segments[i]["start"])*1000
+    queues = []
+    found = False
+
+    for section in sections: # sections are the energetic segments of the song
+        if segments[i]["start"] == section["seg_start"]:
+            found = True
+            
+            # Use the single primary chaser for all energetic segments
+            current_chaser = primary_chaser
+            is_focus_segment = segments[i]["label"] == show.struct["focus"]["first"]
+            
+            # Override chaser selection for focus segments if needed
+            if not onefocus and is_focus_segment and current_chaser == "ColorPulse":
+                # If it's a focus segment and onefocus is False, don't use ColorPulse
+                current_chaser = random.choice(["FastPulse", "SideToSide"])
+            
+            # Apply the selected chaser
+            if current_chaser == "ColorPulse" or simple == True: # simple mode uses only ColorPulse chaser
+                queues.append(self.color_pulse(
+                    name, show, color1=primary_color1, color2=primary_color2, dimmer=255,
+                    length=length, start=start_time, queuename=f"colorpulse{i}"))
+            elif current_chaser == "FastPulse":
+                queues.append(self.fastpulse(
+                    name, show, color1=[primary_color1, primary_color2],
+                    length=length, start=start_time, queuename=f"fastpulse{i}"))
+            elif current_chaser == "SideToSide":
+                queues.append(self.side_to_side(
+                    name, show, color1=primary_color1, color2=primary_color2,
+                    length=length, start=start_time, queuename=f"sidetoside{i}"))
+            break
+
+    if not found:
+        queues.append(self.simple_color(
+            name, show, color=idle_colour, dimmer=255, length=length, 
+            start=start_time, queuename=f"color{i}"))
+```
