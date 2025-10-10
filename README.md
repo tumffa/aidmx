@@ -21,7 +21,7 @@ DM on discord if you have questions @ ```_tume_```
 ### Full song chaser and strobe demo
 [![Showcase Video (old version)](https://img.youtube.com/vi/g-IZg1kFES4/0.jpg)](https://youtu.be/g-IZg1kFES4?si=bYKBismXbn0RaHIn)
 
-## Installation
+## Installation (Python 3.10)
 
 1. Install dependencies from `requirements.txt`. These dependencies are for `Linux/WSL` with an `Nvidia GPU`. For CPU and other configurations, tweak `requirements.txt`. See [Natten](https://natten.org/install/)  and [allin1](https://github.com/mir-aidj/all-in-one) for more info on how to tweak the installations.
     ```
