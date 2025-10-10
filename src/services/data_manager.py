@@ -14,6 +14,7 @@ class DataManager:
         self.data_path = Path(config["data_path"])
         self.struct_path = Path(config["struct_path"])
         self.demix_path = Path(config["demix_path"])
+        self.universe = config["universe"]
         self.songs = {}
 
     def _get_json_data(self):

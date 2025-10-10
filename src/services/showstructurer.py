@@ -7,33 +7,7 @@ class ShowStructurer:
     def __init__(self, data_manager):
         self.dm = data_manager
         self.shows = {}
-        self.universe = {}
-        self.universe["abovewash"] = {
-            "1": {"id": 1, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
-            "2": {"id": 2, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
-            "3": {"id": 3, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
-            "4": {"id": 4, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": (20, 255),
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250}
-        }
-        # "id": QLC fixture ID, these should be in physical order
-        # "dimmer": QLC channel for dimmer
-        # "colortype": "seperate" for different RGB channels, single channel not supported right now
-        # "colorchannels": channels for red, green, blue if colortype is seperate
-        # "strobe": QLC channel for strobe
-        # "stroberange": range of strobe values that produce a strobe effect
-        # "shutter": QLC channel for shutter
-        # "shutters": possible shutter values, "open" is required, "closed" is optional
-        # "nicestrobe": a strobe value for strobe channel that produces a nice strobe effect
-
-        self.universe["strobe"] = {
-            "1": {"id": 0, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": (130, 249),
-                  "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211},
-            "2": {"id": 5, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": (130, 249),
-                  "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211}
-        }
+        self.universe = data_manager.universe
 
         # Dimmer map for help with seperating dimmer commands
         self.fixture_dimmer_map = {}
