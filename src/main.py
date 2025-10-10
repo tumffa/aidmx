@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
-from services.commandhandler import CommandHandler
-from services.queue_service import QueueManager
-from services.dataservice import DataManager
-from services.qlc_service import QLCHandler
+from services.command_handler import CommandHandler
+from services.queue_manager import QueueManager
+from services.data_manager import DataManager
+from services.qlc_manager import QLCManager
 
 
 def load_config(config_path="config.json"):
@@ -18,7 +18,7 @@ def main():
     setup_path = Path(config["setup_path"])
     setupfile_name = setup_path.stem
     data_manager = DataManager(config)
-    qlc = QLCHandler(setupfile_name, setup_path)
+    qlc = QLCManager(setupfile_name, setup_path)
     queueservice = QueueManager(setupfile_name, data_manager, qlc)
     handler = CommandHandler(queueservice)
     handler.start()

@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 from pydub import AudioSegment
 from typing import Union, List
-from services import audio_analyzer
+from services import audio_analysis
 from dataclasses import asdict, is_dataclass
 
 
@@ -48,7 +48,7 @@ class DataManager:
         return filepath[:-4] + ".wav"
     
     def extract_data(self, audio_name, filepath):
-        print(audio_name)
+        print(f"--Extracting data for {audio_name}")
         # Check if the file is an mp3 and convert it to wav
         if filepath.endswith(".mp3"):
             filepath = self.convert_to_wav(filepath)
@@ -67,12 +67,13 @@ class DataManager:
             self.songs[audio_name]["analyzed"] = str(path)
         try:
             if not path.exists():
+                print(f"----Running through Allin1")
                 analyzed = allin1.analyze(Path(filepath))
                 self.save_results(analyzed, self.struct_path, audio_name)
             else:
-                print("Allin1 analysis already exists")
+                print("----Allin1 results already exist")
         except Exception as e:
-            print(f"Error while analyzing: {e}")
+            print(f"----Error while running Allin1: {e}")
         
         path = self.demix_path / "htdemucs" / audio_name
         # true if drums, vocals, bass, other.wav in audio_name
@@ -84,26 +85,28 @@ class DataManager:
             self.songs[audio_name]["demixed"] = str(path)
         try:
             if not demix_exists:
+                print(f"----Demixed audio not found, demixing with Allin1.demix")
                 allin1.demix.demix([Path(filepath)], demix_dir=self.demix_path, device='cuda:0')
             else:
-                print("Already demixed")
+                print("----Already demixed")
         except Exception as e:
-            print(f"Error while demixing: {e}")
+            print(f"----Error while demixing: {e}")
 
         data = self.get_struct_data(audio_name)
         if "rms" not in data or "total_rms" or "larsnet_drums_y" not in data:
             segments = self.get_struct_data_by_key(audio_name, "segments")
             struct_data = self.get_struct_data(audio_name)
-            params = audio_analyzer.initialize_song_metrics(self.songs[audio_name], 
+            params = audio_analysis.initialize_song_metrics(self.songs[audio_name], 
                                                     struct_data=struct_data)
             self.update_struct_data(audio_name, params, indent=2)
             struct_data = self.get_struct_data(audio_name)
-            params = audio_analyzer.struct_stats(self.songs[audio_name], 
+            params = audio_analysis.struct_stats(self.songs[audio_name], 
                                                        audio_name, 
                                                        struct_data=struct_data)
             self.update_struct_data(audio_name, params, indent=2)
 
         self._save_json_data()
+        print(f"--Data extraction complete for {audio_name}")
 
     def sync_with_struct(self):
         for file in self.struct_path.resolve().iterdir():

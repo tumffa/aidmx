@@ -1,7 +1,6 @@
 import os
 from .showstructurer import ShowStructurer
-from services import audio_analyzer
-
+from services import audio_analysis
 
 class QueueManager:
     def __init__(self, setupfile, data_manager, qlc):
@@ -19,8 +18,8 @@ class QueueManager:
             filepath (str, optional): The path to the audio file. If not provided, it will look for the file in the default paths.
             strobes (bool, optional): Whether to include strobes in the show generation. Defaults to False.
         """
-        print(f"Analyzing track {audio_name}")
-        
+        print(f"\nProcessing {audio_name} with strobes={strobes}")
+
         if not filepath:
             # Check for both .mp3 and .wav files
             mp3_path = "{}/songs/{}.mp3".format(self.dm.return_path("data"), audio_name)
@@ -38,12 +37,18 @@ class QueueManager:
     
         self.dm.extract_data(audio_name, os.path.abspath(filepath))
         self.analyze_data(audio_name, strobes)
+        print(f"Finished\n")
 
     def analyze_data(self, audio_name, strobes=False):
+        print(f"--Analyzing data")
         struct_data = self.dm.get_struct_data(audio_name)
-        params = audio_analyzer.segment(audio_name, struct_data)
+        params = audio_analysis.segment(audio_name, struct_data)
         self.dm.update_struct_data(audio_name, params, indent=2)
-        self.structurer.generate_show(audio_name, self.qlc, strobes)
+        
+        print(f"--Generating show")
+        self.qlc.create_copy(audio_name)
+        scripts, function_names = self.structurer.generate_show(audio_name, self.qlc, strobes)
+        self.qlc.add_track(scripts, audio_name, function_names)
     
     def sync_with_struct(self):
         self.dm.sync_with_struct()

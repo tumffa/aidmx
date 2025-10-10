@@ -13,19 +13,18 @@ class CommandHandler:
 
     def info(self):
         print("Commands:")
-        print("analyze <audio_name> <filepath> - Analyze a track")
-        print("analyze_queue <queue_folder> - Analyze all tracks in a folder")
-        print("analyzedata <audio_name> - generate from analyzed file")
-        print("play <audio_name> - Play a track")
-        print("sync - load sons from struct")
+        print("analyze <audio_name> <Y/N>(strobes, default no) - Analyze a track")
+        print("folder <queue_folder> - Analyze all tracks in a folder")
+        print("merge <audio_name> <folder> - Merge shows in folder into single showfile playlist (can be out of sync slightly)")
+        print("sync - run this if there are previously analyzed struct files")
         print("exit - Exit the program")
 
     def handle_command(self, command):
         command = command.split()
         if command[0] == "analyze":
-            strobe = True
-            if len(command) == 3:
-                strobe = False
+            strobe = False
+            if len(command) == 3 and command[2].lower() == 'y':
+                strobe = True
             self.queuemanager.analyze_file(command[1], None, strobe)
         elif command[0] == "sync":
             self.queuemanager.sync_with_struct()

@@ -1602,8 +1602,8 @@ class ShowStructurer:
             qxw (Object): object that handles qlc+ file generation 
             strobes (bool, optional): Whether or not to include strobe effects. Defaults to False.
         """
+        print(f"----Combining scripts for show")
         # delay for powershell command to sync song and lightshow start
-        qxw.create_copy(name) # creates a new file based off of preexisting fixture template
         scripts = [] # list to hold all of the scripts for file
         function_names = [] # list that holds names of beforementioned scripts
         show = self.create_show(name) # holds information about song
@@ -1707,8 +1707,6 @@ class ShowStructurer:
                         # If it's a focus segment and onefocus is False, don't use ColorPulse
                         current_chaser = random.choice(["FastPulse", "SideToSide"])
                     
-                    print(f"Using {current_chaser} for segment {i} ({segments[i]['start']}s - {segments[i]['end']}s) {'FOCUS' if is_focus_segment else ''}")
-                    
                     # Apply the selected chaser
                     if current_chaser == "ColorPulse":
                         queues.append(self.color_pulse(
@@ -1747,7 +1745,7 @@ class ShowStructurer:
             function_names.append(str(segments[i]["start"]) + "_dimmers")
             i += 1
         
-        qxw.add_track(scripts, name, function_names)
+        return scripts, function_names,
 
     def add_chasers(self, name, show, handler):
         handler.add_button(name, "BLACKOUT", "blackout", 1)

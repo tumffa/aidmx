@@ -3,7 +3,7 @@ setuptools>=65.0
 wheel>=0.38
 cmake==3.20.3
 
-# PyTorch + CUDA 12.1 wheels
+# PyTorch + CUDA 12.1 wheels, for CPU, comment out the next line
 -f https://download.pytorch.org/whl/cu121
 torch==2.1.2
 torchvision==0.16.2
@@ -12,6 +12,8 @@ torchaudio==2.1.2
 # NATTEN wheel
 -f https://shi-labs.com/natten/wheels
 natten==0.15.0+torch210cu121
+# for CPU use the following line instead:
+# natten==0.15.0+torch210cpu
 
 # Madmom
 madmom @ git+https://github.com/CPJKU/madmom@27f032e8947204902c675e5e341a3faf5dc86dae

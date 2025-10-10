@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 import shutil
 import time
@@ -20,7 +21,7 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
     Returns:
         tuple: Dictionary of waveforms and sample rate for the drum components
     """
-    print(f"Processing drum components using LarsNet...")
+    print(f"--------Separating drum components using LarsNet...")
     
     # Get the base name of the file without extension for subdirectory
     base_name = os.path.splitext(os.path.basename(drum_audio_path))[0]
@@ -32,8 +33,6 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
     
     # Check if components already exist in the htdemucs structure
     if os.path.exists(seperate_path):
-        print(f"Found potential existing separation in {seperate_path}, checking components...")
-        
         component_paths = {}
         required_components = ['kick', 'snare', 'toms']
         all_components = required_components
@@ -45,15 +44,13 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
             component_path = os.path.join(seperate_path, component, "drums.wav")
             if os.path.exists(component_path):
                 component_paths[component] = component_path
-                print(f"Found existing {component} component at {component_path}")
+                print(f"----------Found existing {component} component at {component_path}")
             elif component in required_components:
                 all_required_exist = False
-                print(f"Missing required {component} component")
+                print(f"----------Missing required {component} component")
         
         # If all required components exist, load them and skip separation
         if all_required_exist and len(component_paths) >= 2:
-            print("Found all required pre-separated components, skipping separation process")
-            
             output = {}
             sr = None
             max_length = 0
@@ -65,9 +62,6 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
                 
                 if sr is None:
                     sr = sample_rate
-                elif sr != sample_rate:
-                    print(f"Warning: {component} has different sample rate ({sample_rate} vs {sr})")
-                    # Will need to resample
                 
                 max_length = max(max_length, len(audio))
             
@@ -78,11 +72,9 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
                     output[component] = np.pad(output[component], 
                                              (0, max_length - len(output[component])), 
                                              mode='constant')
-            
-            print(f"Successfully loaded pre-separated components with sr={sr}")
             return output, sr
     
-    print(f"Pre-separated components not found or incomplete, performing separation...")
+    print(f"------------Pre-separated components not found or incomplete, performing separation...")
     
     # Determine LarsNet path
     larsnet_paths = [
@@ -90,7 +82,7 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
         os.path.join(os.path.dirname(os.getcwd()), "larsnet")
     ]
 
-    print(f"Searching for LarsNet in {larsnet_paths}...")
+    print(f"------------Searching for LarsNet in {larsnet_paths}...")
     
     larsnet_dir = None
     for path in larsnet_paths:
@@ -99,18 +91,9 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
             break
     
     if not larsnet_dir:
-        raise FileNotFoundError("Could not find LarsNet directory with separate.py")
-    
-    print(f"Created output directory for this song: {song_output_dir}")
-    
-    # Check for conda environment in the LarsNet directory
-    env_dir = os.path.join(larsnet_dir, "env")
-    if not os.path.exists(env_dir):
-        print(f"Warning: Could not find conda environment at {env_dir}")
-        print("Using system Python instead. This might cause compatibility issues.")
-        use_conda = False
-    else:
-        use_conda = True
+        raise FileNotFoundError("------------Could not find LarsNet directory with separate.py")
+
+    print(f"------------Created output directory for this song: {song_output_dir}")
     
     # Create a temporary directory for the input drum file
     temp_input_dir = os.path.join(output_dir, "tmp_larsnet_input")
@@ -124,53 +107,30 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
     # Set environment variables to avoid threading issues
     env = os.environ.copy()
     env["MKL_THREADING_LAYER"] = "GNU"
-    
-    # Build command for LarsNet separation
-    separate_script = os.path.join(larsnet_dir, "separate.py")
-    
-    if use_conda:
-        # Using conda environment
-        cmd = [
-            "conda", "run", "--prefix", env_dir,
-            "python", separate_script,
-            "-i", temp_input_dir,
-            "-o", song_output_dir,
-            "-d", device
-        ]
-    else:
-        # Using system Python - IMPORTANT: Change directory to LarsNet dir
-        cmd = [
-            "cd", larsnet_dir, "&&",
-            "python", "separate.py",
-            "-i", os.path.abspath(temp_input_dir),
-            "-o", os.path.abspath(song_output_dir),
-            "-d", device
-        ]
+
+    cmd = [
+        sys.executable, "separate.py",
+        "-i", os.path.abspath(temp_input_dir),
+        "-o", os.path.abspath(song_output_dir),
+        "-d", device
+    ]
     
     # Add Wiener filter parameter if specified
     if wiener_filter > 0:
         cmd.extend(["-w", str(wiener_filter)])
     
-    print(f"Running LarsNet with command: {' '.join(cmd)}")
+    print(f"------------Running LarsNet with command: {' '.join(cmd)}")
     
     try:
-        if not use_conda:
-            # For system Python, we need to run the command in a shell and change directory
-            cmd_str = " ".join(cmd)
-            subprocess.run(cmd_str, shell=True, check=True, env=env)
-        else:
-            subprocess.run(cmd, check=True, env=env)
+        subprocess.run(cmd, check=True, env=env, cwd=larsnet_dir)
         
         # Wait a moment for files to be fully written
         time.sleep(1)
         
         # Find all WAV files in the output directory
-        print(f"Searching for component files in {song_output_dir}...")
         all_wavs = glob.glob(os.path.join(song_output_dir, "**", "*.wav"), recursive=True)
         if not all_wavs:
             all_wavs = glob.glob(os.path.join(song_output_dir, "*.wav"))
-        
-        print(f"Found {len(all_wavs)} WAV files in output directory")
         
         # Search for kick, snare, and toms files in several possible locations
         possible_paths = {
@@ -207,14 +167,6 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
                         break
             
             # If still not found, it will be missing from output_paths
-        
-        # If we didn't find kick and snare, we can't proceed
-        if 'kick' not in output_paths or 'snare' not in output_paths:
-            print("Could not find kick and/or snare components")
-            # Fall back to original drums audio
-            audio, sr = librosa.load(drum_audio_path, sr=None, mono=True)
-            print(f"Using original drums as fallback: shape={audio.shape}, sr={sr}")
-            return {'full_drums': audio}, sr
             
         # Load kick and snare using librosa to handle various audio formats
         kick_audio, kick_sr = librosa.load(output_paths['kick'], sr=None, mono=True)
@@ -222,7 +174,6 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
         
         # Make sure they're the same sample rate
         if kick_sr != snare_sr:
-            print(f"Warning: Kick and snare have different sample rates ({kick_sr} vs {snare_sr})")
             # Resample the one with higher sample rate to match the lower one
             sr = min(kick_sr, snare_sr)
             if kick_sr > sr:
@@ -249,7 +200,7 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
                 elif len(toms_audio) > max_length:
                     toms_audio = toms_audio[:max_length]
             except Exception as e:
-                print(f"Error loading toms audio: {e}. Continuing without toms.")
+                pass
         
         # Prepare output dictionary
         output = {}
@@ -263,12 +214,13 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
             try:
                 shutil.rmtree(temp_input_dir)
             except:
-                print(f"Warning: Failed to clean up temporary directory {temp_input_dir}")
+                print(f"------------Warning: Failed to clean up temporary directory {temp_input_dir}")
 
+        print(f"--------LarsNet separation completed successfully.")
         return output, sr
         
     except Exception as e:
-        print(f"Error running LarsNet: {e}")
+        print(f"------------Error running LarsNet: {e}")
         # Clean up temporary input directory
         if os.path.exists(temp_input_dir):
             try:
@@ -278,9 +230,9 @@ def separate_drums_with_larsnet(drum_audio_path, output_dir, wiener_filter=1, de
             
         # Fall back to original drums audio
         try:
-            print("Using original drums as fallback due to error")
+            print("--------------Using original drums as fallback due to error")
             audio, sr = librosa.load(drum_audio_path, sr=None, mono=True)
             return {'full_drums': audio}, sr
         except:
-            print("Failed to load original drums. Returning empty audio.")
+            print("--------------Failed to load original drums. Returning empty audio.")
             return {'full_drums': np.zeros(1000)}, 22050

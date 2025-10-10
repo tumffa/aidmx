@@ -3,7 +3,7 @@ import os
 from xml.dom.minidom import parse
 from src.utils.config import get_config, to_windows_path
 
-class QLCHandler:
+class QLCManager:
     def __init__(self, filename, setup_path):
         self.showfile_path = setup_path
         self.shows = {}
@@ -32,7 +32,7 @@ class QLCHandler:
             if child.nodeType == node.TEXT_NODE and not child.data.strip():
                 remove_list.append(child)
             elif child.hasChildNodes():
-                QLCHandler.remove_whitespace_nodes(child, unlink)
+                QLCManager.remove_whitespace_nodes(child, unlink)
         for node in remove_list:
             node.parentNode.removeChild(node)
             if unlink:
@@ -49,6 +49,7 @@ class QLCHandler:
         self.shows[showname] = {"Functions": [], "Buttons": []}
         self.shows[showname]["absolute_path"] = absolute_path
         self.shows[showname]["dom"] = parse(absolute_path)
+        print(f"----Created a copy of template to {absolute_path}")
 
     def add_element(self, showname, parent_element_name, element_name, attributes={}, text=None, child_elements=[]):
         # Create the new element
@@ -68,7 +69,7 @@ class QLCHandler:
         parent_element.appendChild(element)
 
         # Remove whitespace nodes
-        QLCHandler.remove_whitespace_nodes(dom)
+        QLCManager.remove_whitespace_nodes(dom)
         showpath = self.shows[showname]["absolute_path"]
         # Write the XML declaration, DOCTYPE declaration, and XML string to the file
         with open(showpath, 'w') as f:
@@ -105,6 +106,7 @@ class QLCHandler:
         return str(len(self.shows[showname]["Functions"])-1)
 
     def add_track(self, show_scripts, showname, function_names):
+        print(f"----Generating QLC show {showname} with {len(show_scripts)} scripts")
         dom = self.shows[showname]["dom"]
         # Initialize scripts with powershell command
         script_ids = [
@@ -139,6 +141,7 @@ class QLCHandler:
         # Write the XML declaration, DOCTYPE declaration, and XML string to the file
         with open(showpath, 'w') as f:
             f.write(dom.toprettyxml(indent="  "))
+        print(f"----Generated QLC show to {showpath}")
 
     def add_chaser(self, showname, chaserid, chasername, duration=10000):
         # Create the chaser element
