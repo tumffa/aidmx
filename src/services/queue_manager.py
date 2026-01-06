@@ -68,13 +68,16 @@ class QueueManager:
         pygame.mixer.music.load(song_path)
         pygame.mixer.music.play()
 
-        time.sleep(0.05)
+        # Wait until audio is actually playing
+        while not pygame.mixer.music.get_busy():
+            time.sleep(0.01)
 
+        # Now start DMX
         dmx_thread = threading.Thread(target=play_dmx_sequence, args=(frame_delays_ms, dmx_frames, universe))
         dmx_thread.start()
         dmx_thread.join()
         pygame.mixer.music.stop()
-    
+        
     def sync_with_struct(self):
         self.dm.sync_with_struct()
 

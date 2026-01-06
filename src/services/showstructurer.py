@@ -25,14 +25,7 @@ class ShowStructurer:
                 self.fixture_dimmer_map[fixture_id] = dimmer_channel
 
         self.dimmer_update_fq = 33 # ms
-        self.wait_adjustment = 0.00
-        self.pause_wait_adjustment = 0.00
         self.dmx_controller = "ola" # alternatively "qlc"
-
-    def adjusted_wait(self, time, is_pause=False):
-        if is_pause:
-            return time - max(1, int(math.floor(time * self.pause_wait_adjustment)))
-        return time - max(1, int(math.floor(time * self.wait_adjustment)))
 
     def get_songdata(self, name):
         struct = self.dm.get_struct_data(name)
@@ -1501,7 +1494,7 @@ class ShowStructurer:
                 wait_to_range = active_range['start_ms'] - update_time_ms
                 if wait_to_range > 0:
                     # Wait until the start of this active range
-                    segment_dimmers.append(self._wait(self.adjusted_wait(wait_to_range), f"Wait until range at {active_range['start_ms']/1000}s"))
+                    segment_dimmers.append(self._wait(wait_to_range, f"Wait until range at {active_range['start_ms']/1000}s"))
                     update_time_ms += wait_to_range
                     remaining_wait -= wait_to_range
                     
@@ -1516,7 +1509,7 @@ class ShowStructurer:
             range_time_remaining = time_in_range
             while range_time_remaining > 0:
                 update_chunk = min(update_frequency_ms, range_time_remaining)
-                segment_dimmers.append(self._wait(self.adjusted_wait(update_chunk), f"Update in active range {active_range['max_value']:.2f}"))
+                segment_dimmers.append(self._wait(update_chunk, f"Update in active range {active_range['max_value']:.2f}"))
                 update_time_ms += update_chunk
                 
                 strength = envelope_function(update_time_ms / 1000.0)
@@ -1838,7 +1831,8 @@ class ShowStructurer:
                         script_states.remove(state)
                 continue
 
-            advance_ms = int(min_wait)
+            advance_ms = round(min_wait)  # Use round, not int
+
             dmx_frames.append(array.array("B", current_levels))
             frame_delays_ms.append(advance_ms)
 
