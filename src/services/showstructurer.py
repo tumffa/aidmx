@@ -25,8 +25,6 @@ class ShowStructurer:
                 self.fixture_dimmer_map[fixture_id] = dimmer_channel
 
         self.dimmer_update_fq = 33 # ms
-        # I've observed that QLC+ scripts have compounding lag the longer
-        # the script gets, so I add an adjustment to combat this
         self.wait_adjustment = 0.00
         self.pause_wait_adjustment = 0.00
         self.dmx_controller = "ola" # alternatively "qlc"
@@ -1746,9 +1744,13 @@ class ShowStructurer:
                 light_strength_envelope=light_strength_envelope,
                 strobe_ranges=strobe_ranges if strobes else None,
             )
+            if self.dmx_controller == "ola":
+                scripts.append(segment_queue)
+                scripts.append(segment_dimmers)
+                i += 1
+                continue
             scripts.append(segment_queue)
             scripts.append(segment_dimmers)
-            # print first 10 entries of dimmer script for debugging
             function_names.append(str(segments[i]["start"]))
             function_names.append(str(segments[i]["start"]) + "_dimmers")
             i += 1

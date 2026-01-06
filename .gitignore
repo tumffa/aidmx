@@ -2,11 +2,14 @@
 *.mp3
 *.mp4
 *.wav
+*.beats
 **__pycache__**
 /*.png
+.vscode
 showfile.txt
 /struct
 /demix
 /data
 /AIQLCshows/play_song_modified.bat
 /src/services/larsnet/inference_models
+/env
