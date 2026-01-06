@@ -14,7 +14,7 @@ class QueueManager:
         self.qlc = qlc
         self.structurer = ShowStructurer(data_manager)
 
-    def analyze_file(self, audio_name, delay=500, strobes=False, simple=False):
+    def analyze_file(self, audio_name, strobes=False, simple=False, delay=0.5):
         """Starts the file analysis process and show generation process.
 
         Args:
@@ -23,7 +23,7 @@ class QueueManager:
             simple (bool, optional): Whether to use simple mode (only a simple color chaser). Defaults to False.
             delay (int, optional): Delay in ms before show start to allow for i.e. song track command to begin. Defaults to 600.
         """
-        print(f"\nProcessing {audio_name} with strobes={strobes}, simple={simple}, delay={delay}ms")
+        print(f"\nProcessing {audio_name} with strobes={strobes}, simple={simple}, delay={delay} seconds")
 
         # Check for both .mp3 and .wav files
         mp3_path = "{}/songs/{}.mp3".format(self.dm.return_path("data"), audio_name)
@@ -43,7 +43,7 @@ class QueueManager:
         self.analyze_data(audio_name, delay, strobes, simple)
         print(f"Finished\n")
 
-    def analyze_data(self, audio_name, delay=None, strobes=False, simple=False):
+    def analyze_data(self, audio_name, delay, strobes=False, simple=False):
         print(f"--Analyzing data")
         struct_data = self.dm.get_struct_data(audio_name)
         params = audio_analysis.segment(audio_name, struct_data)
@@ -51,7 +51,7 @@ class QueueManager:
         
         print(f"--Generating show")
         self.qlc.create_copy(audio_name)
-        scripts_tuple = self.structurer.generate_show(audio_name, self.qlc, delay=delay, strobes=strobes, simple=simple)
+        scripts_tuple = self.structurer.generate_show(audio_name, self.qlc, strobes=strobes, simple=simple)
         if self.structurer.dmx_controller == "qlc":
             scripts, function_names = scripts_tuple
             self.qlc.add_track(scripts, audio_name, function_names)
@@ -61,9 +61,9 @@ class QueueManager:
             if not song_path or not os.path.exists(song_path):
                 print(f"Audio path not found for {audio_name}: {song_path}")
                 return
-            self.song_playback_and_ola(song_path, frame_delays_ms, dmx_frames, universe=1)
+            self.song_playback_and_ola(song_path, frame_delays_ms, dmx_frames, delay=delay, universe=1)
 
-    def song_playback_and_ola(self, song_path, frame_delays_ms, dmx_frames, universe=1):
+    def song_playback_and_ola(self, song_path, frame_delays_ms, dmx_frames, delay, universe):
         pygame.mixer.init()
         pygame.mixer.music.load(song_path)
         pygame.mixer.music.play()
@@ -72,7 +72,8 @@ class QueueManager:
         while not pygame.mixer.music.get_busy():
             time.sleep(0.01)
 
-        # Now start DMX
+        time.sleep(delay)
+
         dmx_thread = threading.Thread(target=play_dmx_sequence, args=(frame_delays_ms, dmx_frames, universe))
         dmx_thread.start()
         dmx_thread.join()

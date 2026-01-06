@@ -42,7 +42,7 @@ class CommandHandler:
             if not name:
                 print("Usage: analyze <audio_name> [--strobe] [--simple] [--delay=milliseconds]")
                 return
-            self.queuemanager.analyze_file(name, strobe, simple, delay)
+            self.queuemanager.analyze_file(name, strobe, simple, delay=delay if delay is not None else 0.5)
 
         elif command[0] == "sync":
             self.queuemanager.sync_with_struct()
