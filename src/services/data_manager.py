@@ -75,6 +75,8 @@ class DataManager:
                 print("----Allin1 results already exist")
         except Exception as e:
             print(f"----Error while running Allin1: {e}")
+
+        self.update_struct_data(audio_name, [{"filepath": str(filepath)}], indent=2)
         
         path = self.demix_path / "htdemucs" / audio_name
         # true if drums, vocals, bass, other.wav in audio_name

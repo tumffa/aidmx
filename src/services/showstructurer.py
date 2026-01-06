@@ -81,7 +81,7 @@ class ShowStructurer:
             return (fixture, channel, value)
 
     def _wait(self, time, comment=""):
-        time = max(0, int(time))
+        time = max(0, int(round(float(time))))
         if self.dmx_controller == "qlc":
             return f"wait:{int(time)} //{comment}"
         elif self.dmx_controller == "ola":
@@ -801,7 +801,7 @@ class ShowStructurer:
         strobe_queue.enqueue(reset)
         strobe_queue.enqueue(0)
         
-        update_period = 10  # ms
+        update_period = 33  # ms
         
         while time > 1:
             # Select a new light and color every light_selection_period ms
@@ -833,7 +833,7 @@ class ShowStructurer:
                         if j == active_fixtures[set_index]:
                             colors = self.calculate_colors(fixture, color)
                             temp += colors
-                            temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"Dimmer on"))
+                            temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer on"))
                             temp.append(self._setfixture(fixture["id"], fixture["strobe"], fixture["nicestrobe"], f"Strobe on"))
                             fixturedimmers[fixture["id"]] = 255
                         elif fixturedimmers[fixture["id"]] > 0:
@@ -1313,47 +1313,47 @@ class ShowStructurer:
         return segment, segment_dimmers
 
     def check_strobe_ranges(self, current_time_ms, wait_time, strobe_ranges):
-        """ Checks if we are entering, in, or exiting a strobe range.
+        """Checks if we are entering, in, or exiting a strobe range.
 
-        Args:
-            current_time_ms (_type_): Current time relative to segment start
-            wait_time (_type_): Current next wait time in milliseconds
-            strobe_ranges (_type_): List of tuples defining strobe ranges (start, end) in seconds
-
-        Returns:
-            Tuple of (entering_strobe_range, in_strobe_range, exiting_strobe_range, wait_time_till_strobe, strobe_range)
+        strobe_ranges: List of (start_sec, end_sec), segment-local seconds.
         """
         entering_strobe_range = False
         in_strobe_range = False
         exiting_strobe_range = False
-        wait_time_till_strobe = wait_time
+        wait_time_till_strobe = int(round(float(wait_time)))
         strobe_range = None
 
-        # Check if we are in a strobe range
         if strobe_ranges:
-            current_time_sec = current_time_ms / 1000.0
-            end_time_sec = current_time_sec + wait_time /1000.0
-            
-            for strobe_range in strobe_ranges:
-                if strobe_range[0] <= current_time_sec <= strobe_range[1]:
+            current_time_sec = float(current_time_ms) / 1000.0
+            end_time_sec = current_time_sec + (float(wait_time) / 1000.0)
+
+            # In range: [start, end)  (end exclusive prevents "sticky" end)
+            for r in strobe_ranges:
+                start, end = float(r[0]), float(r[1])
+                if start <= current_time_sec < end:
                     in_strobe_range = True
+                    strobe_range = (start, end)
                     break
 
-            # Check if we are entering a strobe range
+            # Entering if start happens within (current, end] (start inclusive at end boundary)
             if not in_strobe_range:
-                for strobe_range in strobe_ranges:
-                    if current_time_sec < strobe_range[0] < end_time_sec:
+                for r in strobe_ranges:
+                    start, end = float(r[0]), float(r[1])
+                    if current_time_sec < start <= end_time_sec:
                         entering_strobe_range = True
-                        wait_time_till_strobe = (strobe_range[0] - current_time_sec) * 1000
+                        # round to int ms; ensure we don't produce a 0ms "advance" due to float noise
+                        ms = int(round((start - current_time_sec) * 1000.0))
+                        wait_time_till_strobe = max(1, ms) if ms > 0 else 1
+                        strobe_range = (start, end)
                         break
 
-            # Check if we are exiting a strobe range
-            if in_strobe_range:
-                for strobe_range in strobe_ranges:
-                    if current_time_sec < strobe_range[1] < end_time_sec:
-                        exiting_strobe_range = True
-                        wait_time_till_strobe = (strobe_range[1] - current_time_sec) * 1000
-                        break
+            # Exiting if end happens within (current, end] (end inclusive at boundary)
+            if in_strobe_range and strobe_range is not None:
+                start, end = strobe_range
+                if current_time_sec < end <= end_time_sec:
+                    exiting_strobe_range = True
+                    ms = int(round((end - current_time_sec) * 1000.0))
+                    wait_time_till_strobe = max(1, ms) if ms > 0 else 1
 
         return entering_strobe_range, in_strobe_range, exiting_strobe_range, wait_time_till_strobe, strobe_range
 
@@ -1406,16 +1406,16 @@ class ShowStructurer:
                 
             # Adjust start if needed
             if onset_start < start_time:
-                # If onset starts before our segment, adjust to 0.1s after segment start
-                adjusted_start = 0.1
+                # If onset starts before our segment, adjust
+                adjusted_start = 0.05
             else:
                 # Otherwise shift relative to segment start
                 adjusted_start = onset_start - start_time
                 
             # Adjust end if needed
             if onset_end > end_time:
-                # If onset ends after our segment, adjust to 0.1s before segment end
-                adjusted_end = segment_duration - 0.1
+                # If onset ends after our segment, adjust
+                adjusted_end = segment_duration - 0.05
             else:
                 # Otherwise shift relative to segment start
                 adjusted_end = onset_end - start_time
@@ -1502,10 +1502,11 @@ class ShowStructurer:
         # Add scripts for each pause (blackout) in the song
         queues = []
         pauses = show.struct["silent_ranges"]
+        pauses = [(pause[0] / 43, pause[1] / 43) for pause in pauses]
         if self.dmx_controller == "qlc":
             for pause in pauses:
-                pause_start = pause[0] / 43
-                pause_end = pause[1] / 43
+                pause_start = pause[0]
+                pause_end = pause[1]
                 pausename = f"pause{str(pause[0])[:5]}"
                 queues.append(self.pause((pause_end - pause_start), type="blackout", queuename=pausename, start=pause_start*1000))
             scripts.append(self.combine(queues)[0])
@@ -1559,6 +1560,8 @@ class ShowStructurer:
 
             if strobes and onset_parts:
                 strobe_ranges = self.preprocess_onset_ranges(segments[i]["start"], segments[i]["end"], onset_parts)
+            if pauses:
+                pause_ranges = self.preprocess_onset_ranges(segments[i]["start"], segments[i]["end"], pauses)
             segment_queue, segment_dimmers = self.combine(
                 queues,
                 end_time=end_time,

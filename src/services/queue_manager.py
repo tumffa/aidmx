@@ -14,7 +14,7 @@ class QueueManager:
         self.qlc = qlc
         self.structurer = ShowStructurer(data_manager)
 
-    def analyze_file(self, audio_name, strobes=False, simple=False, delay=0.5):
+    def analyze_file(self, audio_name, strobes=False, simple=False, delay=0):
         """Starts the file analysis process and show generation process.
 
         Args:
@@ -57,7 +57,7 @@ class QueueManager:
             self.qlc.add_track(scripts, audio_name, function_names)
         elif self.structurer.dmx_controller == "ola":
             frame_delays_ms, dmx_frames = scripts_tuple
-            song_path = struct_data.get("path")
+            song_path = struct_data.get("filepath")
             if not song_path or not os.path.exists(song_path):
                 print(f"Audio path not found for {audio_name}: {song_path}")
                 return
