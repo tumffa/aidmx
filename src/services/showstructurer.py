@@ -1838,9 +1838,9 @@ class ShowStructurer:
                         script_states.remove(state)
                 continue
 
-            advance_ms = max(min_wait, min_frame_interval_ms)
+            advance_ms = int(min_wait)
             dmx_frames.append(array.array("B", current_levels))
-            frame_delays_ms.append(int(advance_ms))
+            frame_delays_ms.append(advance_ms)
 
             for state in script_states:
                 state["next_wait"] = max(0, state["next_wait"] - advance_ms)
