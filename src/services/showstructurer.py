@@ -1,13 +1,20 @@
 import re
 import random
 import math
+import array
 from scipy import interpolate
 
 class ShowStructurer:
     def __init__(self, data_manager):
         self.dm = data_manager
         self.shows = {}
-        self.universe = data_manager.universe
+        self.universe_size = data_manager.universe.get("size", 512)
+        self.universe = {k: v for k, v in data_manager.universe.items() if k != "size"}
+
+        self.fixture_addresses = {}
+        for group in self.universe.values():
+            for fixture in group.values():
+                self.fixture_addresses[fixture["id"]] = fixture["address"]
 
         # Dimmer map for help with seperating dimmer commands
         self.fixture_dimmer_map = {}
@@ -17,11 +24,12 @@ class ShowStructurer:
                 dimmer_channel = fixture["dimmer"]
                 self.fixture_dimmer_map[fixture_id] = dimmer_channel
 
-        self.dimmer_update_fq = 15 # ms
+        self.dimmer_update_fq = 33 # ms
         # I've observed that QLC+ scripts have compounding lag the longer
         # the script gets, so I add an adjustment to combat this
-        self.wait_adjustment = 0.08
-        self.pause_wait_adjustment = 0.02
+        self.wait_adjustment = 0.00
+        self.pause_wait_adjustment = 0.00
+        self.dmx_controller = "ola" # alternatively "qlc"
 
     def adjusted_wait(self, time, is_pause=False):
         if is_pause:
@@ -77,19 +85,24 @@ class ShowStructurer:
         return envelope_function
 
     def _setfixture(self, fixture, channel, value, comment=""):
-        if value > 255:
-            value = 255
-        if value < 0:
-            value = 0
-        return f"setfixture:{fixture} ch:{channel} val:{value} //{comment}"
+        value = max(0, min(255, value))
+        if self.dmx_controller == "qlc":
+            return f"fixture:{fixture} channel:{channel} value:{value} //{comment}"
+        elif self.dmx_controller == "ola":
+            return (fixture, channel, value)
 
     def _wait(self, time, comment=""):
-        if time < 0:
-            time = 0
-        return f"wait:{int(time)} //{comment}"
+        time = max(0, int(time))
+        if self.dmx_controller == "qlc":
+            return f"wait:{int(time)} //{comment}"
+        elif self.dmx_controller == "ola":
+            return int(time)
     
     def _blackout(self, mode, comment=""):
-        return f"blackout:{mode} //{comment}"
+        if self.dmx_controller == "qlc":
+            return f"blackout:{mode} //{comment}"
+        elif self.dmx_controller == "ola":
+            return 0
     
     def _execute(self, command, comment=""):
         return f"systemcommand:{command} //{comment}"
@@ -1325,14 +1338,20 @@ class ShowStructurer:
             
             if q[0] not in do_not_execute:
                 for command in commands:
-                    # Extract fixture ID, channel and value from the QLC+ command
-                    match = re.search(r'setfixture:(\d+) ch:(\d+) val:(\d+)', command)
-                    if match:
+                    match = False
+                    # Extract fixture ID, channel and value from the QLC+ / OLA command
+                    if self.dmx_controller == "qlc":
+                        match = re.search(r'setfixture:(\d+) ch:(\d+) val:(\d+)', command)
                         fixture_id, channel, value = match.groups()
                         fixture_id = int(fixture_id)
                         channel = int(channel)
                         original_value = int(value)
-                        
+
+                    elif self.dmx_controller == "ola" and isinstance(command, tuple):
+                        fixture_id, channel, original_value = command
+                        match = True
+
+                    if match:
                         # Store this fixture state for later restoration
                         if fixture_id not in fixture_dimmers:
                             fixture_dimmers[fixture_id] = {}
@@ -1536,7 +1555,6 @@ class ShowStructurer:
         # If we have remaining wait time after all ranges, add final wait
         if remaining_wait > 0:
             segment_dimmers.append(self._wait(remaining_wait, f"Finished, wait for {remaining_wait}ms"))
-
         return True
     
     def preprocess_onset_ranges(self, start_time, end_time, onset_ranges):
@@ -1664,13 +1682,14 @@ class ShowStructurer:
         # Add scripts for each pause (blackout) in the song
         queues = []
         pauses = show.struct["silent_ranges"]
-        for pause in pauses:
-            pause_start = pause[0] / 43
-            pause_end = pause[1] / 43
-            pausename = f"pause{str(pause[0])[:5]}"
-            queues.append(self.pause((pause_end - pause_start), type="blackout", queuename=pausename, start=pause_start*1000 + delay))
-        scripts.append(self.combine(queues)[0])
-        function_names.append("pauses")
+        if self.dmx_controller == "qlc":
+            for pause in pauses:
+                pause_start = pause[0] / 43
+                pause_end = pause[1] / 43
+                pausename = f"pause{str(pause[0])[:5]}"
+                queues.append(self.pause((pause_end - pause_start), type="blackout", queuename=pausename, start=pause_start*1000 + delay))
+            scripts.append(self.combine(queues)[0])
+            function_names.append("pauses")
 
         # Add scripts for each segment in the song
         i = 0
@@ -1729,13 +1748,109 @@ class ShowStructurer:
             )
             scripts.append(segment_queue)
             scripts.append(segment_dimmers)
+            # print first 10 entries of dimmer script for debugging
             function_names.append(str(segments[i]["start"]))
             function_names.append(str(segments[i]["start"]) + "_dimmers")
             i += 1
+
+        if self.dmx_controller == "ola":
+            result = self.combine_scripts_to_ola_format(scripts)
+            return result
         
-        return scripts, function_names
+        result = (scripts, function_names)
+        return result
+    
+    def combine_scripts_to_ola_format(self, scripts):
+        """
+        Merge multiple scripts (each: [wait_ms, (fixture_id, rel_channel, value), ..., wait_ms, ...])
+        into (frame_delays_ms, dmx_frames) for OLA.
+        Maps channel to absolute: abs_channel = self.fixture_addresses[fixture_id] + rel_channel
+        """
+        # Default tick ~30 Hz => minimum ~33 ms between scheduled frames
+        max_freq = 30.0
+        min_frame_interval_ms = 33 # int(round(1000.0 / max_freq))
+
+        def _is_command_tuple(x):
+            return isinstance(x, tuple) and len(x) == 3
+
+        def script_event_iterator(script):
+            idx = 0
+            n = len(script)
+            while idx < n:
+                entry = script[idx]
+                if not isinstance(entry, int):
+                    idx += 1
+                    continue
+
+                wait_ms = max(0, entry)
+                idx += 1
+
+                commands = []
+                while idx < n and not isinstance(script[idx], int):
+                    cmd = script[idx]
+                    if _is_command_tuple(cmd):
+                        commands.append(cmd)
+                    elif isinstance(cmd, list):
+                        for sub in cmd:
+                            if _is_command_tuple(sub):
+                                commands.append(sub)
+                    idx += 1
+
+                yield wait_ms, commands
+
+        all_scripts = [s for s in (scripts or []) if isinstance(s, list) and s]
+
+        script_states = []
+        for script in all_scripts:
+            it = script_event_iterator(script)
+            try:
+                wait_ms, commands = next(it)
+            except StopIteration:
+                continue
+            script_states.append({"iter": it, "next_wait": wait_ms, "pending": commands})
+
+        if not script_states:
+            return [0], [array.array("B", [0] * self.universe_size)]
+
+        current_levels = [0] * self.universe_size
+        dmx_frames = []
+        frame_delays_ms = []
+
+        while script_states:
+            min_wait = min(s["next_wait"] for s in script_states)
+
+            if min_wait == 0:
+                ready = [s for s in script_states if s["next_wait"] == 0]
+                for state in ready:
+                    for fixture_id, rel_channel, value in state["pending"]:
+                        # Map to absolute channel
+                        abs_channel = self.fixture_addresses[fixture_id] + rel_channel
+                        # abs_channel is 1-based, so subtract 1 for 0-based index
+                        if isinstance(abs_channel, int) and 1 <= abs_channel <= self.universe_size:
+                            current_levels[abs_channel - 1] = max(0, min(255, int(value)))
+                    try:
+                        wait_ms, commands = next(state["iter"])
+                        state["next_wait"] = max(0, int(wait_ms))
+                        state["pending"] = commands
+                    except StopIteration:
+                        script_states.remove(state)
+                continue
+
+            advance_ms = max(min_wait, min_frame_interval_ms)
+            dmx_frames.append(array.array("B", current_levels))
+            frame_delays_ms.append(int(advance_ms))
+
+            for state in script_states:
+                state["next_wait"] = max(0, state["next_wait"] - advance_ms)
+
+        blackout = array.array("B", [0] * self.universe_size)
+        dmx_frames.append(blackout)
+        frame_delays_ms.append(min_frame_interval_ms)
+
+        return (frame_delays_ms, dmx_frames)
 
     def add_chasers(self, name, show, handler):
+        return # Disabled for now
         handler.add_button(name, "BLACKOUT", "blackout", 1)
 
         queues = []

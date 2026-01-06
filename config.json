@@ -6,21 +6,22 @@
   "win_app_path": "/wsl.localhost/Ubuntu-22.04/home/tumffa",
   "program_data_path": "/mnt/c/ProgramData",
   "universe": {
+    "size": 32,
     "abovewash": {
       "1": {"id": 1, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250, "address": 7},
       "2": {"id": 2, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250, "address": 12},
       "3": {"id": 3, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250, "address": 17},
       "4": {"id": 4, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250}
+                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250, "address": 22}
     },
     "strobe": {
         "1": {"id": 0, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": [130, 249],
-                  "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211},
+                  "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211, "address": 1},
         "2": {"id": 5, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": [130, 249],
-                    "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211}
+                    "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211, "address": 27}
     }
   }
 }

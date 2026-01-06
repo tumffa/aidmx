@@ -1,6 +1,10 @@
 import os
+import threading
+import time
+import pygame
 from src.services.showstructurer import ShowStructurer
 from src.services import audio_analysis
+from src.services.ola_dmx_controller import play_dmx_sequence
 
 class QueueManager:
     def __init__(self, setupfile, data_manager, qlc):
@@ -47,8 +51,29 @@ class QueueManager:
         
         print(f"--Generating show")
         self.qlc.create_copy(audio_name)
-        scripts, function_names = self.structurer.generate_show(audio_name, self.qlc, delay=delay, strobes=strobes, simple=simple)
-        self.qlc.add_track(scripts, audio_name, function_names)
+        scripts_tuple = self.structurer.generate_show(audio_name, self.qlc, delay=delay, strobes=strobes, simple=simple)
+        if self.structurer.dmx_controller == "qlc":
+            scripts, function_names = scripts_tuple
+            self.qlc.add_track(scripts, audio_name, function_names)
+        elif self.structurer.dmx_controller == "ola":
+            frame_delays_ms, dmx_frames = scripts_tuple
+            song_path = struct_data.get("path")
+            if not song_path or not os.path.exists(song_path):
+                print(f"Audio path not found for {audio_name}: {song_path}")
+                return
+            self.song_playback_and_ola(song_path, frame_delays_ms, dmx_frames, universe=1)
+
+    def song_playback_and_ola(self, song_path, frame_delays_ms, dmx_frames, universe=1):
+        pygame.mixer.init()
+        pygame.mixer.music.load(song_path)
+        pygame.mixer.music.play()
+
+        time.sleep(0.05)
+
+        dmx_thread = threading.Thread(target=play_dmx_sequence, args=(frame_delays_ms, dmx_frames, universe))
+        dmx_thread.start()
+        dmx_thread.join()
+        pygame.mixer.music.stop()
     
     def sync_with_struct(self):
         self.dm.sync_with_struct()
