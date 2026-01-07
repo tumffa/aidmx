@@ -5,6 +5,16 @@ from ola.ClientWrapper import ClientWrapper
 UNIVERSE = 1
 wrapper = None
 
+# Compat wrapper for old ola-python expecting .tostring()
+class _OLAArrayCompat:
+    def __init__(self, buf):
+        self._buf = buf
+    def tostring(self):
+        try:
+            return self._buf.tobytes()
+        except AttributeError:
+            return bytes(self._buf)
+
 def DmxSent(state):
     if not state.Succeeded():
         print("Failed to send DMX")
@@ -23,15 +33,13 @@ def play_dmx_sequence(frame_delays_ms, dmx_frames, universe=UNIVERSE):
 
     def make_send_func(frame):
         def send():
-            wrapper.Client().SendDmx(universe, frame, DmxSent)
+            wrapper.Client().SendDmx(universe, _OLAArrayCompat(frame), DmxSent)
         return send
 
-    # Schedule all frames at their absolute time offsets
     for i, frame in enumerate(dmx_frames):
         delay = frame_delays_ms[i] if i < len(frame_delays_ms) else 33
         wrapper.AddEvent(total_delay, make_send_func(frame))
         total_delay += delay
 
-    # Stop wrapper after last frame
     wrapper.AddEvent(total_delay, wrapper.Stop)
     wrapper.Run()

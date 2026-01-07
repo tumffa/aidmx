@@ -1072,7 +1072,6 @@ class ShowStructurer:
         result["queue"] = colorpulse_queue
         return result
     
-    #### this is the meat and potatoes here ####
     def combine(self, queues, end_time=None, seperate_dimmer=True, strobe_ranges=None):
         """
         Combines multiple fixture/wait command queues into a single sequence per time segment.
@@ -1417,12 +1416,32 @@ class ShowStructurer:
             onset_parts = show.struct["onset_parts"]
             for part in onset_parts:
                 queues = []
-                queues.append(self.randomstrobe(name, show, length=part[1]*1000-part[0]*1000, start=part[0]*1000, queuename=f"strobe{part[0]}", light_selection_period=50))
-                ola_script = self.combine(queues)[0]
-                qlc_script = self.convert_scripts_to_qlc_format([ola_script], qlc_delay=qlc_delay, qlc_lag=qlc_lag, is_dimmer=False)[0]
+                queues.append(self.randomstrobe(name, show,
+                                                length=part[1]*1000-part[0]*1000,
+                                                start=part[0]*1000,
+                                                queuename=f"strobe{part[0]}",
+                                                light_selection_period=50))
+                # Combine returns (main, dimmers). Keep both.
+                ola_script, ola_dimmers = self.combine(queues)
+
+                # OLA: append both tracks
                 ola_scripts.append(ola_script)
-                qlc_scripts.append(qlc_script)
+                ola_scripts.append(ola_dimmers)
+
+                # QLC+: queue (no lag), dimmers (with lag scaling)
+                qlc_queue = self.convert_scripts_to_qlc_format([ola_script],
+                                                               qlc_delay=qlc_delay,
+                                                               qlc_lag=1.0,
+                                                               is_dimmer=False)[0]
+                qlc_dim = self.convert_scripts_to_qlc_format([ola_dimmers],
+                                                             qlc_delay=qlc_delay,
+                                                             qlc_lag=qlc_lag,
+                                                             is_dimmer=True)[0]
+                qlc_scripts.append(qlc_queue)
+                qlc_scripts.append(qlc_dim)
+
                 function_names.append(f"strobe{part[0]}")
+                function_names.append(f"strobe{part[0]}_dimmers")
 
         # Add scripts for each segment in the song
         i = 0

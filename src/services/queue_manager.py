@@ -7,7 +7,7 @@ from src.services.audio_analysis import audio_analysis
 from src.services.ola_dmx_controller import play_dmx_sequence
 
 class QueueManager:
-    def __init__(self, setupfile, data_manager, qlc):
+    def __init__(self, setupfile, data_manager, qlc=None):
         self.queue = []
         self.ready = []
         self.dm = data_manager
