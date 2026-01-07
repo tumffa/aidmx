@@ -1,19 +1,21 @@
-# MP3 to QLC+ Light Show Generator
+# MP3 to QLC+ / OLA DMX Show Generator
 
-This project takes an MP3 file and generates a synchronized light show script for QLC+ based on the audio.
+This project takes an MP3/wav file and generates a synchronized light show script for QLC+ / OLA based on the analysis.
 
 DM on discord if you have questions @ ```_tume_```
 
 ## Features
 - **Segmentation**: Segments the song and applies chasers based on perceived energy.
 - **BPM sync**: Chasers are synced to BPM.
-- **Dimmer scaling**: Dimmer updates are scaled based on kick/snare hits.
-- **Strobes**: Optional strobe effects that are synchronized with drum onsets (most effective with metal music). Currently broken with dimmer scaling.
+- **Dimmer scaling**: Dimmer brightness is scaled based on kick/snare hits to sync the beat.
+- **Strobes**: Optional strobe effects that are synchronized with drum onsets (most effective with metal music).
 - **QLC+ Script Generation**:
   - Builds a new QLC file based on an existing fixture template.
-  - Writes separate QLC+ dimmer and chaser scripts for each segment, as well as separate scripts for pause blackouts and strobes.
+  - Writes separate QLC+ dimmer and chaser scripts for each segment, as well as separate scripts for strobes.
   - Synchronizes all scripts into a QLC+ collection.
-  - Adds virtual console buttons for chasers/strobes/blackout
+- **OLA DMX control**:
+  - DMX states and execution timeframes are written to a json file
+  - OLA can be used to play the generated show and song playback is synced.
 
 ## Showcases
 ### Kick/snare -based dimmer scaling
@@ -21,15 +23,19 @@ DM on discord if you have questions @ ```_tume_```
 ### Full song chaser and strobe demo
 [![Showcase Video (old version)](https://img.youtube.com/vi/g-IZg1kFES4/0.jpg)](https://youtu.be/g-IZg1kFES4?si=bYKBismXbn0RaHIn)
 
-## Installation (Python 3.10)
+## Installation Linux (Python 3.10)
 
-1. Install dependencies from `requirements.txt`. These dependencies are for `Linux/WSL` with an `Nvidia GPU`. For CPU and other configurations, tweak `requirements.txt`. See [Natten](https://natten.org/install/)  and [allin1](https://github.com/mir-aidj/all-in-one) for more info on how to tweak the installations.
+1. Install dependencies:
     ```
     pip3 install -r requirements.txt
     ```
-2. [Download](https://drive.google.com/uc?id=1U8-5924B1ii1cjv9p0MTPzayb00P4qoL&export=download) the `LarsNet` inference models, unzip the folder, and place it into `src/services/larsnet/inference_models`.
+2. Install ola and ola-python (skip if you do not intend to use OLA):
+    ```
+    sudo apt install ola ola-python
+    ```
+4. [Download](https://drive.google.com/uc?id=1U8-5924B1ii1cjv9p0MTPzayb00P4qoL&export=download) the `LarsNet` inference models, unzip the folder, and place it into `src/services/larsnet/inference_models`.
 
-3. Edit `config.json`:
+5. Edit `config.json`:
    ```json
    {
       "data_path": "./data",
@@ -40,9 +46,9 @@ DM on discord if you have questions @ ```_tume_```
       "program_data_path": "/mnt/c/ProgramData" # Specify the folder where setup.py will create AIQLCshows folder for generated shows and play_song.bat script will reside.
     }
    ```
-4. Copy your template `.qxw` file into `./data` directory.
+6. Copy your template `.qxw` file into `./data` directory.
 
-5. Run `setup.py`. This will create the necessary folders, etc.
+7. Run `setup.py`. This will create the necessary folders, etc.
 
 ## Universe setup and usage
 
@@ -50,16 +56,18 @@ DM on discord if you have questions @ ```_tume_```
 Configure `universe` in `config.json` to match the configuration in your template `.qxw` file. The chasers that are implemented are mostly based on just a row of washers such as this. Use the `abovewash` -key for such setup.
   ```json
   "universe": {
+    "size": 32,
     "abovewash": {
       "1": {"id": 1, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250, "address": 7},
       "2": {"id": 2, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250, "address": 12},
       "3": {"id": 3, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250},
+                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250, "address": 17},
       "4": {"id": 4, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250}
+                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250, "address": 22}
     }
+  }
   ```
 **Meanings of keys:**
 - **"id"**: QLC fixture ID, these should be in physical order
@@ -71,18 +79,28 @@ Configure `universe` in `config.json` to match the configuration in your templat
 - **"shutter"**: QLC channel for shutter
 - **"shutters"**: possible shutter values, "open" is required, "closed" is optional
 - **"nicestrobe"**: a strobe value for strobe channel that produces a nice strobe effect
+- **"address"**: the address of the fixture in the universe [1-512]
 
 ### Usage
-**To generate QLC+ show**, first move the desired `.mp3` / `.wav` file into `./data/songs`.
+**To generate QLC+ / OLA show**, first move the desired `.mp3` / `.wav` file into `./data/songs`.
 
 Then, in the main directory, run:
 
   ```
-  python3 generate_show.py song_name [--strobe] [--simple] [--delay=ms]
+  python3 generate_show.py song_name [-st] [-si] [-d] [-l]
   ```
-- `--strobe` can be used to turn strobes effects on
-- `--simple` can be used to limit the energetic chasers to `color_pulse`, which is good if you're running only a couple fixtures.
-- `--delay=ms` can be used to define a delay before the start of the QLC+ show. Default is 500ms, if you want to use the PowerShell script.
+- `-st` can be used to turn strobes effects on
+- `-si` can be used to limit the energetic chasers to `color_pulse`, which is good if you're running only a couple fixtures.
+- `-d` can be used to define a delay before the start of the QLC+ show. Default is 1 second, if you want to use the PowerShell script.
+- `-l` can be used to define a scaling factor for QLC+ dimmer script wait times. This is to help with the compounding lag, scale down/up if beat flashes are too slow/fast.
+
+**To playback the OLA sequence and song**, run:
+
+  ```
+  python3 ola_playback.py song_name [-d] [-u]
+  ```
+- `-d` can be used to set the delay before DMX starts to sync it with song playback.
+- `-u` can be used to set the universe, default 1.
 
 Alternatively, for more options through the command-line interface, run:
   ```
@@ -98,7 +116,7 @@ The chaser should return a dictionary:
     "queue": "Queue() object"
   }
   ```
-The `Queue()` object should begin with an `integer` (initial wait time) and then alternate between `lists of QLC+ script lines` and wait time `integers`.
+The `Queue()` object should begin with an `integer` (initial wait time) and then alternate between tuples of `(fixture_id, channel, value)` and wait time `integers`.
 The `combine` function will take any number of these chaser queue dictionaries and alter the wait times so that each chaser can run concurrently.
 It then combines them into a dimmer script and a script containing the other commands. Use `self._setfixture` to generate script lines. 
 For instance, to open shutters of fixture 1, use following:
