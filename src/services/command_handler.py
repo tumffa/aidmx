@@ -13,7 +13,9 @@ class CommandHandler:
 
     def info(self):
         print("Commands:")
-        print("analyze <audio_name> [--strobe] [--simple] [--delay=ms] - Analyze a single track. Use --simple if you, for instance, only have a couple lights")
+        print("analyze <audio_name> [--strobe] [--simple] [--ola_delay=0.25)] [--qlc_delay=1)] [--qlc_lag=0.8955)]")
+        print("-Delays are used to delay light show to match song playback")
+        print("-qlc_lag used to downscale dimmer wait times for lag, scale down/up if beat flashes are too slow/fast")
         print("folder <queue_folder> - Analyze all tracks in a folder")
         print("merge <audio_name> <folder> - Merge shows in folder into single showfile playlist (can be out of sync slightly)")
         print("sync - run this if there are previously analyzed struct files")
@@ -25,24 +27,44 @@ class CommandHandler:
             strobe = False
             simple = False
             name = None
-            delay = None
+            ola_delay = None
+            qlc_delay = None
+            qlc_lag = None
             for arg in command[1:]:
                 if arg.lower() in ['--strobe', '-s', 'y']:
                     strobe = True
                 elif arg.lower() in ['--simple', '-m']:
                     simple = True
-                elif arg.lower().startswith('--delay='):
+                elif arg.lower().startswith('--ola_delay='):
                     try:
-                        delay = int(arg.split('=', 1)[1])
+                        ola_delay = float(arg.split('=', 1)[1])
                     except ValueError:
-                        print("Invalid delay value, must be an integer (milliseconds)")
+                        print("Invalid ola_delay value")
+                elif arg.lower().startswith('--qlc_delay='):
+                    try:
+                        qlc_delay = float(arg.split('=', 1)[1])
+                    except ValueError:
+                        print("Invalid qlc_delay value")
+                        return
+                elif arg.lower().startswith('--qlc_lag='):
+                    try:
+                        lag_value = float(arg.split('=', 1)[1])
+                        self.queuemanager.structurer.set_qlc_lag(lag_value)
+                    except ValueError:
+                        print("Invalid qlc_lag value")
                         return
                 elif not name:
                     name = arg
             if not name:
-                print("Usage: analyze <audio_name> [--strobe] [--simple] [--delay=milliseconds]")
+                print("Usage: analyze <audio_name> [--strobe] [--simple] [--ola_delay=seconds] [--qlc_delay=milliseconds] [--qlc_lag=percentage]")
                 return
-            self.queuemanager.analyze_file(name, strobe, simple, delay=delay if delay is not None else 0)
+            if ola_delay is None or ola_delay < 0:
+                ola_delay = 0.25
+            if qlc_delay is None or qlc_delay < 0:
+                qlc_delay = 1
+            if qlc_lag is None or qlc_lag <= 0:
+                qlc_lag = 0.8955
+            self.queuemanager.analyze_file(name, strobe, simple, ola_delay=ola_delay, qlc_delay=qlc_delay, qlc_lag=qlc_lag)
 
         elif command[0] == "sync":
             self.queuemanager.sync_with_struct()

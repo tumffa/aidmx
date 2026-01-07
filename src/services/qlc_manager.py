@@ -105,7 +105,7 @@ class QLCManager:
 
         return str(len(self.shows[showname]["Functions"])-1)
 
-    def add_track(self, show_scripts, showname, function_names):
+    def add_track(self, showname, show_scripts, function_names):
         print(f"----Generating QLC show {showname} with {len(show_scripts)} scripts")
         dom = self.shows[showname]["dom"]
         # Initialize scripts with powershell command

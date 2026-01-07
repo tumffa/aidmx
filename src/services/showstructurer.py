@@ -10,21 +10,18 @@ class ShowStructurer:
         self.universe_size = data_manager.universe.get("size", 512)
         self.universe = {k: v for k, v in data_manager.universe.items() if k != "size"}
 
-        self.fixture_addresses = {}
-        for group in self.universe.values():
-            for fixture in group.values():
-                self.fixture_addresses[fixture["id"]] = fixture["address"]
-
         # Dimmer map for help with seperating dimmer commands
+        # and fixture address map
+        self.fixture_addresses = {}
         self.fixture_dimmer_map = {}
         for group_name, group in self.universe.items():
             for fixture_key, fixture in group.items():
                 fixture_id = fixture["id"]
+                self.fixture_addresses[fixture_id] = fixture["address"]
                 dimmer_channel = fixture["dimmer"]
                 self.fixture_dimmer_map[fixture_id] = dimmer_channel
 
         self.dimmer_update_fq = 33 # ms
-        self.dmx_controller = "ola" # alternatively "qlc"
 
     def get_songdata(self, name):
         struct = self.dm.get_struct_data(name)
@@ -74,23 +71,18 @@ class ShowStructurer:
 
     def _setfixture(self, fixture, channel, value, comment=""):
         value = max(0, min(255, value))
-        if self.dmx_controller == "qlc":
-            return f"fixture:{fixture} channel:{channel} value:{value} //{comment}"
-        elif self.dmx_controller == "ola":
-            return (fixture, channel, value)
+        return (fixture, channel, value)
+        
+    def _qlc_setfixture(self, fixture, channel, value, comment=""):
+        return f"setfixture:{fixture} ch:{channel} val:{value} //{comment}"
 
     def _wait(self, time, comment=""):
         time = max(0, int(round(float(time))))
-        if self.dmx_controller == "qlc":
-            return f"wait:{int(time)} //{comment}"
-        elif self.dmx_controller == "ola":
-            return int(time)
+        return int(time)
     
-    def _blackout(self, mode, comment=""):
-        if self.dmx_controller == "qlc":
-            return f"blackout:{mode} //{comment}"
-        elif self.dmx_controller == "ola":
-            return 0
+    def _qlc_wait(self, time, comment=""):
+        time = max(0, int(round(float(time))))
+        return f"wait:{int(time)} //{comment}"
     
     def _execute(self, command, comment=""):
         return f"systemcommand:{command} //{comment}"
@@ -687,62 +679,6 @@ class ShowStructurer:
         result["queue"] = idle_queue
         return result
     
-    def pause(self, length, type="blackout", start=0, queuename="pause"):
-        result = {}
-        result["name"] = queuename
-        if type == "blackout":
-            blackout_queue = Queue()
-            blackout_queue.enqueue(start)
-            temp = []
-            temp.append(self._blackout("on", f"Blackout for {length} seconds"))
-            blackout_queue.enqueue(temp)
-            wait = length * 1000
-            blackout_queue.enqueue(wait)
-            temp = []
-            temp.append(self._blackout("off", f"Blackout off"))
-            blackout_queue.enqueue(temp)
-            result["queue"] = blackout_queue
-
-        if type == "beams":
-            result = {}
-            result["name"] = "pause"
-            group = self.universe["abovemoving"]
-            othergroups = []
-            if "abovewash" in self.universe:
-                othergroups.append(self.universe["abovewash"])
-            if "flood" in self.universe:
-                othergroups.append(self.universe["flood"])
-            if "strobe" in self.universe:
-                othergroups.append(self.universe["strobe"])
-            beam_queue = Queue()
-            beam_queue.enqueue(0)
-            temp = []
-            wait = 200
-            time = length*1000 - wait
-            speed = self.calculate_tilt_speed(group["1"], 74, time/1000)
-            for group in othergroups:
-                for fixture in group.values():
-                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
-            beam_queue.enqueue(temp)
-            beam_queue.enqueue(0)
-            temp = []
-            for fixture in group.values():
-                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
-                temp.append(self._setfixture(fixture["id"], fixture["movespeed"], 0, f"Set move speed"))
-                temp.append(self._setfixture(fixture["id"], fixture["pan"], 127, f"Pan to 127"))
-                temp.append(self._setfixture(fixture["id"], fixture["tilt"], 100, f"Tilt to 100"))
-            beam_queue.enqueue(temp)
-            beam_queue.enqueue(wait)
-            temp = []
-            for fixture in group.values():
-                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["movespeed"], speed, f"Set move speed"))
-                temp.append(self._setfixture(fixture["id"], fixture["tilt"], 0, f"Tilt to 0"))
-            beam_queue.enqueue(temp)
-            beam_queue.enqueue(time)
-            result["queue"] = beam_queue
-        return result
-    
     def reset_position(self, queuename="reset1"):
         result = {}
         result["name"] = queuename
@@ -1269,40 +1205,24 @@ class ShowStructurer:
             
             if q[0] not in do_not_execute:
                 for command in commands:
-                    match = False
-                    # Extract fixture ID, channel and value from the QLC+ / OLA command
-                    if self.dmx_controller == "qlc":
-                        match = re.search(r'setfixture:(\d+) ch:(\d+) val:(\d+)', command)
-                        fixture_id, channel, value = match.groups()
-                        fixture_id = int(fixture_id)
-                        channel = int(channel)
-                        original_value = int(value)
-
-                    elif self.dmx_controller == "ola" and isinstance(command, tuple):
-                        fixture_id, channel, original_value = command
-                        match = True
-
-                    if match:
-                        # Store this fixture state for later restoration
-                        if fixture_id not in fixture_dimmers:
-                            fixture_dimmers[fixture_id] = {}
-                        fixture_dimmers[fixture_id][channel] = original_value
-                        
-                        # Only add commands to script if not in a strobe range
-                        if not in_strobe_range:
-                            is_dimmer_command = (fixture_id in self.fixture_dimmer_map and 
-                                            channel == self.fixture_dimmer_map[fixture_id])
-                            if is_dimmer_command and seperate_dimmer:
-                                # Add dimmer command to the script
-                                dimmer_command = self._setfixture(fixture_id, channel, original_value,
-                                                                f"Scaled value {original_value} from {original_value}")
-                                segment_dimmers.append(dimmer_command)
-                            else:
-                                # if not dimmer command, just add the command as is
-                                segment.append(command)
-                    elif not in_strobe_range:
-                        # realistically we should not get here, but if we do, just add the command
-                        segment.append(command)
+                    fixture_id, channel, original_value = command
+                    # Store this fixture state for later restoration
+                    if fixture_id not in fixture_dimmers:
+                        fixture_dimmers[fixture_id] = {}
+                    fixture_dimmers[fixture_id][channel] = original_value
+                    
+                    # Only add commands to script if not in a strobe range
+                    if not in_strobe_range:
+                        is_dimmer_command = (fixture_id in self.fixture_dimmer_map and 
+                                        channel == self.fixture_dimmer_map[fixture_id])
+                        if is_dimmer_command and seperate_dimmer:
+                            # Add dimmer command to the script
+                            dimmer_command = self._setfixture(fixture_id, channel, original_value,
+                                                            f"Scaled value {original_value} from {original_value}")
+                            segment_dimmers.append(dimmer_command)
+                        else:
+                            # if not dimmer command, just add the command as is
+                            segment.append(command)
 
             # Get next wait period
             wait = queue.dequeue()
@@ -1427,7 +1347,7 @@ class ShowStructurer:
         
         return processed_ranges
 
-    def generate_show(self, name, qxw, strobes=False, simple=False):
+    def generate_show(self, name, qxw, strobes, simple, qlc_delay, qlc_lag):
         """
             Generates all functions, buttons, etc. for a QLC+ file. 
         Args:
@@ -1435,9 +1355,12 @@ class ShowStructurer:
             qxw (Object): object that handles qlc+ file generation 
             strobes (bool, optional): Whether or not to include strobe effects. Defaults to False.
             simple (bool, optional): Whether to use simple mode (only a simple color chaser). Defaults to False.
+            qlc_delay (int, optional): Delay in ms to add to each QLC+ script
+            qlc_lag (int, optional): Used to scale wait times down to account for lag
         """
         print(f"----Combining scripts for show")
-        scripts = [] # list to hold all of the scripts for file
+        ola_scripts = []  # OLA scripts
+        qlc_scripts = []  # QLC+ scripts
         function_names = [] # list that holds names of beforementioned scripts
         show = self.create_show(name) # holds information about song
         sections = show.struct["chorus_sections"] # energetic segments of the song
@@ -1495,21 +1418,11 @@ class ShowStructurer:
             for part in onset_parts:
                 queues = []
                 queues.append(self.randomstrobe(name, show, length=part[1]*1000-part[0]*1000, start=part[0]*1000, queuename=f"strobe{part[0]}", light_selection_period=50))
-                scripts.append(self.combine(queues)[0])
+                ola_script = self.combine(queues)[0]
+                qlc_script = self.convert_scripts_to_qlc_format([ola_script], qlc_delay=qlc_delay, qlc_lag=qlc_lag, is_dimmer=False)[0]
+                ola_scripts.append(ola_script)
+                qlc_scripts.append(qlc_script)
                 function_names.append(f"strobe{part[0]}")
-
-        # Add scripts for each pause (blackout) in the song
-        queues = []
-        pauses = show.struct["silent_ranges"]
-        pauses = [(pause[0] / 43, pause[1] / 43) for pause in pauses]
-        if self.dmx_controller == "qlc":
-            for pause in pauses:
-                pause_start = pause[0]
-                pause_end = pause[1]
-                pausename = f"pause{str(pause[0])[:5]}"
-                queues.append(self.pause((pause_end - pause_start), type="blackout", queuename=pausename, start=pause_start*1000))
-            scripts.append(self.combine(queues)[0])
-            function_names.append("pauses")
 
         # Add scripts for each segment in the song
         i = 0
@@ -1559,28 +1472,37 @@ class ShowStructurer:
 
             if strobes and onset_parts:
                 strobe_ranges = self.preprocess_onset_ranges(segments[i]["start"], segments[i]["end"], onset_parts)
-            if pauses:
-                pause_ranges = self.preprocess_onset_ranges(segments[i]["start"], segments[i]["end"], pauses)
+            else:
+                strobe_ranges = None
+
             segment_queue, segment_dimmers = self.combine(
                 queues,
                 end_time=end_time,
-                strobe_ranges=strobe_ranges if strobes else None,
+                strobe_ranges=strobe_ranges,
             )
             light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]
             segment_dimmers = self.scale_dimmer_with_envelope(segment_dimmers, light_strength_envelope)
 
-            scripts.append(segment_queue)
-            scripts.append(segment_dimmers)
+            # OLA scripts
+            ola_scripts.append(segment_queue)
+            ola_scripts.append(segment_dimmers)
+
+            # QLC+ scripts (queue and dimmer, lag scaling only on dimmer)
+            qlc_scripts.append(self.convert_scripts_to_qlc_format([segment_queue], qlc_delay=qlc_delay, qlc_lag=1.0, is_dimmer=False)[0])
+            qlc_scripts.append(self.convert_scripts_to_qlc_format([segment_dimmers], qlc_delay=qlc_delay, qlc_lag=qlc_lag, is_dimmer=True)[0])
 
             function_names.append(str(segments[i]["start"]))
             function_names.append(str(segments[i]["start"]) + "_dimmers")
-            i += 1
 
-        if self.dmx_controller == "ola":
-            result = self.combine_scripts_to_ola_format(scripts)
-            return result
-        
-        result = (scripts, function_names)
+        ola_result = self.combine_scripts_to_ola_format(ola_scripts)
+
+        result = {
+            "ola": ola_result,
+            "qlc": {
+                "scripts": qlc_scripts,
+                "function_names": function_names
+            }
+        }
         return result
     
     def scale_dimmer_with_envelope(self, segment_dimmers, light_strength_envelope):
@@ -1846,7 +1768,59 @@ class ShowStructurer:
         dmx_frames.append(blackout)
         frame_delays_ms.append(min_frame_interval_ms)
 
-        return (frame_delays_ms, dmx_frames)
+        result = {}
+        result["frame_delays_ms"] = frame_delays_ms
+        result["dmx_frames"] = dmx_frames
+
+        return result
+    
+
+    def convert_scripts_to_qlc_format(self, scripts, qlc_delay, qlc_lag, is_dimmer=False):
+        qlc_delay = int(round(float(qlc_delay) * 1000))
+
+        def _is_cmd_tuple(x):
+            return isinstance(x, tuple) and len(x) == 3
+
+        def _emit(entry, out, is_first_wait, lag_accum):
+            if isinstance(entry, int):
+                wait_time = entry
+                if is_first_wait[0]:
+                    wait_time += qlc_delay
+                    is_first_wait[0] = False
+                    out.append(self._qlc_wait(wait_time))
+                elif is_dimmer:
+                    # Improved: accumulate fractional milliseconds for smooth scaling
+                    scaled = wait_time * qlc_lag + lag_accum[0]
+                    wait_scaled = int(scaled)
+                    lag_accum[0] = scaled - wait_scaled
+                    # Always emit at least 1 ms if original wait was > 0
+                    if wait_time > 0 and wait_scaled == 0:
+                        wait_scaled = 1
+                        lag_accum[0] -= (1 - scaled)
+                    out.append(self._qlc_wait(wait_scaled))
+                else:
+                    out.append(self._qlc_wait(wait_time))
+            elif _is_cmd_tuple(entry):
+                fixture, channel, value = entry
+                out.append(self._qlc_setfixture(fixture, channel, value, ""))
+            elif isinstance(entry, list):
+                for sub in entry:
+                    _emit(sub, out, is_first_wait, lag_accum)
+            elif isinstance(entry, str):
+                out.append(entry)
+
+        qlc_scripts = []
+        for script in scripts:
+            if not isinstance(script, list):
+                continue
+            script_copy = script.copy()
+            out = []
+            is_first_wait = [True]
+            lag_accum = [0.0]  # Accumulate fractional ms across all waits
+            for entry in script_copy:
+                _emit(entry, out, is_first_wait, lag_accum)
+            qlc_scripts.append(out)
+        return qlc_scripts
 
     def add_chasers(self, name, show, handler):
         return # Disabled for now
