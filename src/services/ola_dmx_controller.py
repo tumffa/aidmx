@@ -16,7 +16,7 @@ def play_dmx_sequence(frame_delays_ms, dmx_frames, universe=UNIVERSE):
     Uses absolute timing to avoid cumulative lag.
     """
     global wrapper
-    print(f"----Playing DMX sequence with OLA on universe {universe}")
+    print(f"----Playing----")
 
     wrapper = ClientWrapper()
     total_delay = 0

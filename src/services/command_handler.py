@@ -12,65 +12,120 @@ class CommandHandler:
                 self.handle_command(command)
 
     def info(self):
-        print("Commands:")
-        print("analyze <audio_name> [--strobe] [--simple] [--ola_delay=0.25)] [--qlc_delay=1)] [--qlc_lag=0.8955)]")
-        print("-Delays are used to delay light show to match song playback")
-        print("-qlc_lag used to downscale dimmer wait times for lag, scale down/up if beat flashes are too slow/fast")
-        print("folder <queue_folder> - Analyze all tracks in a folder")
-        print("merge <audio_name> <folder> - Merge shows in folder into single showfile playlist (can be out of sync slightly)")
-        print("sync - run this if there are previously analyzed struct files")
-        print("exit - Exit the program")
+        print("\n\nCommands:")
+        print("\nanalyze <audio_name> [-st] [-si] [-qd=SEC)] [-ql=FRAC)]")
+        print("--Starts analysis from scratch and generates show for <audio_name> file in songs folder")
+        print("-- Strobes can be enabled with -st")
+        print("--Delay -qd is used to delay qlc light show to match powershell command song playback")
+        print("--Fraction -ql is used to downscale dimmer wait times for lag, scale down/up if beat flashes are too slow/fast")
+        print("\ngenerate <audio_name> - Generate show with existing struct data for <audio_name>")
+        print("--use 'sync' command first to sync struct data")
+        print("\nola <audio_name> [-od=SEC] [-u=N]")
+        print("--Play OLA show for <audio_name> with existing struct data with delay -od and universe -u")
+        print("\nfolder <queue_folder> - Analyze all tracks in a folder")
+        print("\nmerge <audio_name> <folder> - Merge shows in folder into single showfile playlist (can be out of sync slightly)")
+        print("\nsync - run this if there are previously analyzed struct files")
+        print("\nexit - Exit the program")
 
     def handle_command(self, command):
         command = command.split()
-        if command[0] == "analyze":
+        if not command:
+            return
+
+        if command[0] in ("analyze", "generate"):
             strobe = False
             simple = False
+            name = None
+            qlc_delay = 1.0
+            qlc_lag = 0.8955
+
+            for arg in command[1:]:
+                if arg.lower() in ['--strobe', '-st', 'y']:
+                    strobe = True
+                elif arg.lower() in ['--simple', '-si']:
+                    simple = True
+                elif arg.lower() in ['--qlc_delay', '-qd']:
+                    try:
+                        qlc_delay = float(arg.split('=')[1])
+                    except ValueError:
+                        print("Invalid qlc_delay value")
+                        return
+                elif arg.lower() in ['--qlc_lag', '-ql']:
+                    try:
+                        qlc_lag = float(arg.split('=')[1])
+                    except ValueError:
+                        print("Invalid qlc_lag value")
+                        return
+
+                elif not name:
+                    name = arg
+
+            if not name:
+                print("Usage: analyze/generate <audio_name> [-st] [-si] [-qd=SEC] [-ql=FRAC]")
+                return
+
+            if command[0] == "analyze":
+                self.queuemanager.analyze_file(
+                    name,
+                    strobe,
+                    simple,
+                    qlc_delay=qlc_delay,
+                    qlc_lag=qlc_lag,
+                )
+            else:
+                self.queuemanager.generate(
+                    name,
+                    strobe,
+                    simple,
+                    qlc_delay=qlc_delay,
+                    qlc_lag=qlc_lag,
+                )
+
+        elif command[0] == "ola":
             name = None
             ola_delay = None
             qlc_delay = None
             qlc_lag = None
+            universe = None
+
             for arg in command[1:]:
-                if arg.lower() in ['--strobe', '-s', 'y']:
-                    strobe = True
-                elif arg.lower() in ['--simple', '-m']:
-                    simple = True
-                elif arg.lower().startswith('--ola_delay='):
+                al = arg.lower()
+                if al.startswith('-od='):
                     try:
                         ola_delay = float(arg.split('=', 1)[1])
                     except ValueError:
                         print("Invalid ola_delay value")
-                elif arg.lower().startswith('--qlc_delay='):
-                    try:
-                        qlc_delay = float(arg.split('=', 1)[1])
-                    except ValueError:
-                        print("Invalid qlc_delay value")
                         return
-                elif arg.lower().startswith('--qlc_lag='):
+                elif al.startswith('-u='):
                     try:
-                        lag_value = float(arg.split('=', 1)[1])
-                        self.queuemanager.structurer.set_qlc_lag(lag_value)
+                        universe = int(arg.split('=', 1)[1])
                     except ValueError:
-                        print("Invalid qlc_lag value")
+                        print("Invalid universe value")
                         return
                 elif not name:
                     name = arg
+
             if not name:
-                print("Usage: analyze <audio_name> [--strobe] [--simple] [--ola_delay=seconds] [--qlc_delay=milliseconds] [--qlc_lag=percentage]")
+                print("Usage: ola <audio_name> [-od=SEC] [-u=N]")
                 return
+
             if ola_delay is None or ola_delay < 0:
-                ola_delay = 0.25
+                ola_delay = 0.06
             if qlc_delay is None or qlc_delay < 0:
-                qlc_delay = 1
+                qlc_delay = 1.0
             if qlc_lag is None or qlc_lag <= 0:
                 qlc_lag = 0.8955
-            self.queuemanager.analyze_file(name, strobe, simple, ola_delay=ola_delay, qlc_delay=qlc_delay, qlc_lag=qlc_lag)
+            if universe is None or universe <= 0:
+                universe = 1
+
+            # Play OLA show with given delay/universe
+            self.queuemanager.play_ola_show(name, delay=ola_delay, universe=universe)
 
         elif command[0] == "sync":
             self.queuemanager.sync_with_struct()
-        elif command[0] == "analyzedata":
+        elif command[0] == "generate":
             name = command[1]
-            self.queuemanager.analyze_data(name)
+            self.queuemanager.generate(name)
         elif command[0] == "info":
             self.info()
         elif command[0] == "merge":

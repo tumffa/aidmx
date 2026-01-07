@@ -21,7 +21,6 @@ class QLCManager:
             os.makedirs(directory)
 
         self.destination_folder = directory
-        print(self.destination_folder)
         
     @staticmethod
     def remove_whitespace_nodes(node, unlink=False):
