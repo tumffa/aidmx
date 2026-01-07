@@ -10,7 +10,7 @@ def frame_to_time(frame_idx):
 def time_to_frame(t):
     return librosa.time_to_frames(t, sr=22050, hop_length=512)
     
-def analyze_drum_patterns(demix_path, beats=None, segments=None):
+def analyze_drum_beat_pattern(demix_path, beats=None, segments=None):
     """
     Use demixed kick and snare tracks and beats to calculate an envelope that is used to scale
     dimmer intensity based on dominant hits. Snare is scaled higher than kick.
@@ -75,7 +75,7 @@ def analyze_drum_patterns(demix_path, beats=None, segments=None):
         snare_analysis = analyze_component(
             snare_audio, snare_onset_env_normalized, "snare", start_time, end_time)
         
-        # Find beat snare/kick hits (without periodicity parameters since we don't have them yet)
+        # Find beat snare/kick matches
         beat_kick_matches, beat_snare_matches = match_beats_with_drum_hits(
             beats, 
             kick_analysis.get("hit_times_with_strength", []), 
@@ -228,8 +228,7 @@ def calculate_periodicity_from_matches(matched_hits, start_time, end_time):
             "period_timeframes": []
         }
 
-def match_beats_with_drum_hits(beats, kick_hits, snare_hits, window=0.15, 
-                              kick_period=None, snare_period=None, kick_pattern_grid=None, snare_pattern_grid=None):
+def match_beats_with_drum_hits(beats, kick_hits, snare_hits, window=0.15):
     """
     Match beats with drum hits based on proximity and hit strength.
     
@@ -238,10 +237,6 @@ def match_beats_with_drum_hits(beats, kick_hits, snare_hits, window=0.15,
         kick_hits: List of (time, strength) tuples for kick hits
         snare_hits: List of (time, strength) tuples for snare hits
         window: Time window (in seconds) to consider a beat matching with a hit
-        kick_period: Not used but kept for compatibility
-        snare_period: Not used but kept for compatibility
-        kick_pattern_grid: Not used but kept for compatibility
-        snare_pattern_grid: Not used but kept for compatibility
     
     Returns:
         A tuple containing:
@@ -525,7 +520,13 @@ def find_beat_defining_hits(segment, kick_beat_matches, snare_beat_matches, wind
     
     return segment
 
-def calculate_light_strength_envelope(segment, resolution_ms=5, min_strength=0.01, snare_multi=1, max_snare_fadeout=1.5, kick_multi=0.5, max_kick_fadeout=0.8):
+def calculate_light_strength_envelope(segment, 
+                                      resolution_ms=5, 
+                                      min_strength=0.01, 
+                                      snare_multi=1, 
+                                      max_snare_fadeout=1.5, 
+                                      kick_multi=0.5, 
+                                      max_kick_fadeout=0.8):
     """
     Calculate a combined strength envelope from kick and snare beat-defining hits.
     Uses ONLY real hits (no phantom/grid markers) for more authentic light patterns.

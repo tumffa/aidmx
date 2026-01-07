@@ -3,7 +3,7 @@ import threading
 import time
 import pygame
 from src.services.showstructurer import ShowStructurer
-from src.services import audio_analysis
+from src.services.audio_analysis import audio_analysis
 from src.services.ola_dmx_controller import play_dmx_sequence
 
 class QueueManager:

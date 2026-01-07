@@ -1,33 +1,32 @@
 import librosa
-from src.services import drum_analysis_strobes
-from src.services import drum_analysis_dimmer
-from src.services.seperate_drums_larsnet import separate_drums_with_larsnet
+import numpy as np
+from src.services.audio_analysis import drum_analysis_strobes
+from src.services.audio_analysis import drum_analysis_dimmer
+from src.services.audio_analysis.seperate_drums_larsnet import separate_drums_with_larsnet
 
 
 def initialize_song_metrics(song_data, struct_data=None):
     """Initial analysis to get basic metrics like RMS and separated drum onsets."""
     print("------Initializing song audio metrics")
 
-    rms = [float(x) for x in get_rms(song_data)[0]]
-    bass_rms = [float(x) for x in get_rms(song_data, category=["bass"])[0]]
-    drums_rms = [float(x) for x in get_rms(song_data, category=["drums"])[0]]
-    other_rms = [float(x) for x in get_rms(song_data, category=["other"])[0]]
-    vocals_rms = [float(x) for x in get_rms(song_data, category=["vocals"])[0]]
+    rms = np.array(get_rms(song_data)[0], dtype=float)
+    bass_rms = np.array(get_rms(song_data, category=["bass"])[0], dtype=float)
+    drums_rms = np.array(get_rms(song_data, category=["drums"])[0], dtype=float)
+    other_rms = np.array(get_rms(song_data, category=["other"])[0], dtype=float)
+    vocals_rms = np.array(get_rms(song_data, category=["vocals"])[0], dtype=float)
 
-    total_rms = sum(rms) / len(rms)
-    bass_average = sum(bass_rms) / len(bass_rms)
-    drums_average = sum(drums_rms) / len(drums_rms)
-    other_average = sum(other_rms) / len(other_rms)
-    vocals_average = sum(vocals_rms) / len(vocals_rms)
+    total_rms = float(np.mean(rms))
+    bass_average = float(np.mean(bass_rms))
+    drums_average = float(np.mean(drums_rms))
+    other_average = float(np.mean(other_rms))
+    vocals_average = float(np.mean(vocals_rms))
 
     # Get the separated drums using LarsNet
     kick_snare_toms, sr = seperate_kick_toms_snare(song_data)
-    # Sum of kick, snare, and toms to onsets input
     larsnet_drums = kick_snare_toms["kick"] + kick_snare_toms["snare"] + kick_snare_toms["toms"]
     onset_parts = drum_analysis_strobes.get_onset_parts(segments=struct_data["segments"], input=larsnet_drums, sr=sr)
 
-    # Analyze drum patterns
-    enriched_segments = drum_analysis_dimmer.analyze_drum_patterns(
+    enriched_segments = drum_analysis_dimmer.analyze_drum_beat_pattern(
         demix_path=song_data["demixed"], 
         beats=struct_data["beats"], 
         segments=struct_data["segments"])
@@ -36,11 +35,11 @@ def initialize_song_metrics(song_data, struct_data=None):
         {
             "segments": enriched_segments,
             "total_rms": total_rms,
-            "rms": rms,
-            "bass_rms": bass_rms,
-            "drums_rms": drums_rms,
-            "other_rms": other_rms,
-            "vocals_rms": vocals_rms,
+            "rms": rms.tolist(),
+            "bass_rms": bass_rms.tolist(),
+            "drums_rms": drums_rms.tolist(),
+            "other_rms": other_rms.tolist(),
+            "vocals_rms": vocals_rms.tolist(),
             "bass_average": bass_average,
             "drums_average": drums_average,
             "other_average": other_average,
@@ -150,7 +149,7 @@ def seperate_kick_toms_snare(song_data):
     output_dict, sr = separate_drums_with_larsnet(drums_path, output_dir)
     return output_dict, sr
 
-def get_rms(song_data=None, category=None, path=None)->tuple[list[float], float]:
+def get_rms(song_data=None, category=None, path=None) -> tuple[np.ndarray, float]:
     # Load the segment data from the JSON file
     if path:
         data_path = path
@@ -162,17 +161,17 @@ def get_rms(song_data=None, category=None, path=None)->tuple[list[float], float]
         raise Exception("Invalid arguments")
     # Calculate the average intensity
     if category:
-        list = []
+        rms_arrays = []
         for instru in category:
             path = f"{data_path}/{instru}.wav"
             data_y, sr = librosa.load(path)
-            list.append(librosa.feature.rms(y=data_y)[0])
-        rms = [sum(x) for x in zip(*list)]
-        average = sum(rms) / len(rms)
+            rms_arrays.append(librosa.feature.rms(y=data_y)[0])
+        rms = np.sum(np.stack(rms_arrays), axis=0)
+        average = np.mean(rms)
         return rms, average
     data_y, sr = librosa.load(data_path)
     rms = librosa.feature.rms(y=data_y)[0]
-    average = sum(rms) / len(rms)
+    average = np.mean(rms)
     return rms, average
 
 def struct_stats(song_data, name=None, category=None, path=None, rms=False, params=[], struct_data=None):
