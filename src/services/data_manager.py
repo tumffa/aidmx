@@ -1,11 +1,12 @@
 import allin1
 import os
 import json
+import array
 import numpy as np
 from pathlib import Path
 from pydub import AudioSegment
 from typing import Union, List
-from src.services import audio_analysis
+from src.services.audio_analysis import audio_analysis
 from dataclasses import asdict, is_dataclass
 
 
@@ -75,6 +76,8 @@ class DataManager:
                 print("----Allin1 results already exist")
         except Exception as e:
             print(f"----Error while running Allin1: {e}")
+
+        self.update_struct_data(audio_name, [{"filepath": str(filepath)}], indent=2)
         
         path = self.demix_path / "htdemucs" / audio_name
         # true if drums, vocals, bass, other.wav in audio_name
@@ -236,3 +239,55 @@ class DataManager:
             result_dict["path"] = str(name)
             json_str = json.dumps(result_dict, indent=indent)
             (out_dir / f"{name}.json").write_text(json_str)
+
+    def save_ola_sequence(self, name, frame_delays_ms, dmx_frames):
+        """
+        Save an OLA DMX sequence (frame delays and frames) to a JSON file.
+
+        Args:
+            name (str): Base name for the saved sequence.
+            frame_delays_ms (list[int]): Per-frame delays in milliseconds.
+            dmx_frames (list[array.array('B')]): DMX frames.
+        """
+        base_dir = self.data_path / "ola_sequences"
+        os.makedirs(base_dir, exist_ok=True)
+        out_path = base_dir / f"{name}_ola.json"
+
+        # Convert array('B') frames to plain lists for JSON
+        serializable_frames = [list(frame) for frame in dmx_frames]
+
+        payload = {
+            "frame_delays_ms": frame_delays_ms,
+            "dmx_frames": serializable_frames,
+        }
+
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        print(f"--Saved OLA sequence for {name} to {out_path}")
+
+    def load_ola_sequence(self, name):
+        """
+        Load a previously saved OLA DMX sequence.
+
+        Args:
+            name (str): Base name used when saving the sequence.
+
+        Returns:
+            tuple[list[int], list[array.array('B')]]: (frame_delays_ms, dmx_frames)
+        """
+        base_dir = self.data_path / "ola_sequences"
+        path = base_dir / f"{name}_ola.json"
+
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"OLA sequence file not found: {path}")
+
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        frame_delays_ms = payload.get("frame_delays_ms", [])
+        raw_frames = payload.get("dmx_frames", [])
+
+        # Recreate array('B') frames
+        dmx_frames = [array.array("B", frame) for frame in raw_frames]
+
+        return frame_delays_ms, dmx_frames

@@ -1,25 +1,31 @@
 import os
+import threading
+import time
+import pygame
 from src.services.showstructurer import ShowStructurer
-from src.services import audio_analysis
+from src.services.audio_analysis import audio_analysis
+from src.services.ola_dmx_controller import play_dmx_sequence
 
 class QueueManager:
-    def __init__(self, setupfile, data_manager, qlc):
+    def __init__(self, setupfile, data_manager, qlc=None):
         self.queue = []
         self.ready = []
         self.dm = data_manager
         self.qlc = qlc
         self.structurer = ShowStructurer(data_manager)
 
-    def analyze_file(self, audio_name, delay=500, strobes=False, simple=False):
+    def analyze_file(self, audio_name, strobes, simple, qlc_delay, qlc_lag):
         """Starts the file analysis process and show generation process.
 
         Args:
             audio_name (str): The name of the audio file to analyze.
             strobes (bool, optional): Whether to include strobes in the show generation. Defaults to False.
             simple (bool, optional): Whether to use simple mode (only a simple color chaser). Defaults to False.
-            delay (int, optional): Delay in ms before show start to allow for i.e. song track command to begin. Defaults to 600.
+            ola_delay (int, optional): Delay in ms before show start to allow for i.e. song track command to begin. Defaults to 600.
+            qlc_delay (int, optional): Delay in ms before show start to allow for i.e. song track command to begin. Defaults to 0.
         """
-        print(f"\nProcessing {audio_name} with strobes={strobes}, simple={simple}, delay={delay}ms")
+        print(
+            f"\nProcessing {audio_name} with strobes={strobes}, simple={simple}, qlc_delay={qlc_delay} sec, qlc_lag={qlc_lag}")
 
         # Check for both .mp3 and .wav files
         mp3_path = "{}/songs/{}.mp3".format(self.dm.return_path("data"), audio_name)
@@ -36,20 +42,64 @@ class QueueManager:
             return
     
         self.dm.extract_data(audio_name, os.path.abspath(filepath))
-        self.analyze_data(audio_name, delay, strobes, simple)
+        self.generate(audio_name, strobes, simple, qlc_delay, qlc_lag)
         print(f"Finished\n")
 
-    def analyze_data(self, audio_name, delay=None, strobes=False, simple=False):
+    def generate(self, audio_name, strobes, simple, qlc_delay, qlc_lag):
         print(f"--Analyzing data")
         struct_data = self.dm.get_struct_data(audio_name)
         params = audio_analysis.segment(audio_name, struct_data)
         self.dm.update_struct_data(audio_name, params, indent=2)
         
-        print(f"--Generating show")
+        print(f"--Generating show with strobes={strobes}, simple={simple}, qlc_delay={qlc_delay} sec, qlc_lag={qlc_lag}")
         self.qlc.create_copy(audio_name)
-        scripts, function_names = self.structurer.generate_show(audio_name, self.qlc, delay=delay, strobes=strobes, simple=simple)
-        self.qlc.add_track(scripts, audio_name, function_names)
-    
+        scripts_dict = self.structurer.generate_show(
+            audio_name, 
+            self.qlc, 
+            strobes=strobes, 
+            simple=simple, 
+            qlc_delay=qlc_delay, 
+            qlc_lag=qlc_lag)
+
+        scripts = scripts_dict["qlc"]["scripts"]
+        function_names = scripts_dict["qlc"]["function_names"]
+        self.qlc.add_track(audio_name, scripts, function_names)
+
+        frame_delays_ms, dmx_frames = scripts_dict["ola"]["frame_delays_ms"], scripts_dict["ola"]["dmx_frames"]
+        self.dm.save_ola_sequence(audio_name, frame_delays_ms, dmx_frames)
+
+    def play_ola_show(self, audio_name, delay, universe):
+        print(f"--Playing OLA show for {audio_name} with delay {delay} sec on universe {universe}")
+
+        struct_data = self.dm.get_struct_data(audio_name)
+        song_path = struct_data.get("filepath")
+        if not song_path or not os.path.exists(song_path):
+            print(f"Audio path not found for {audio_name}: {song_path}")
+            return
+        
+        frame_delays_ms, dmx_frames = self.dm.load_ola_sequence(audio_name)
+        print(f"--Loaded OLA sequence from {song_path}")
+
+        self.song_playback_and_ola(song_path, frame_delays_ms, dmx_frames, delay=delay, universe=universe)
+
+    def song_playback_and_ola(self, song_path, frame_delays_ms, dmx_frames, delay, universe):
+        print(f"--Starting playback of {song_path}")
+        pygame.mixer.init()
+        pygame.mixer.music.load(song_path)
+        pygame.mixer.music.play()
+
+        # Wait until audio is actually playing
+        while not pygame.mixer.music.get_busy():
+            time.sleep(0.01)
+
+        time.sleep(delay)
+
+        print(f"--Starting DMX sequence playback with OLA")
+        dmx_thread = threading.Thread(target=play_dmx_sequence, args=(frame_delays_ms, dmx_frames, universe))
+        dmx_thread.start()
+        dmx_thread.join()
+        pygame.mixer.music.stop()
+        
     def sync_with_struct(self):
         self.dm.sync_with_struct()
 

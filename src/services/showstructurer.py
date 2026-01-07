@@ -1,32 +1,27 @@
 import re
 import random
-import math
+import array
 from scipy import interpolate
 
 class ShowStructurer:
     def __init__(self, data_manager):
         self.dm = data_manager
         self.shows = {}
-        self.universe = data_manager.universe
+        self.universe_size = data_manager.universe.get("size", 512)
+        self.universe = {k: v for k, v in data_manager.universe.items() if k != "size"}
 
         # Dimmer map for help with seperating dimmer commands
+        # and fixture address map
+        self.fixture_addresses = {}
         self.fixture_dimmer_map = {}
         for group_name, group in self.universe.items():
             for fixture_key, fixture in group.items():
                 fixture_id = fixture["id"]
+                self.fixture_addresses[fixture_id] = fixture["address"]
                 dimmer_channel = fixture["dimmer"]
                 self.fixture_dimmer_map[fixture_id] = dimmer_channel
 
-        self.dimmer_update_fq = 15 # ms
-        # I've observed that QLC+ scripts have compounding lag the longer
-        # the script gets, so I add an adjustment to combat this
-        self.wait_adjustment = 0.08
-        self.pause_wait_adjustment = 0.02
-
-    def adjusted_wait(self, time, is_pause=False):
-        if is_pause:
-            return time - max(1, int(math.floor(time * self.pause_wait_adjustment)))
-        return time - max(1, int(math.floor(time * self.wait_adjustment)))
+        self.dimmer_update_fq = 33 # ms
 
     def get_songdata(self, name):
         struct = self.dm.get_struct_data(name)
@@ -55,8 +50,6 @@ class ShowStructurer:
             
         env_times = light_strength_envelope.get("times", [])
         env_values = light_strength_envelope.get("values", [])
-        segment_start = light_strength_envelope.get("segment_start", 0)
-        segment_end = light_strength_envelope.get("segment_end", 0)
         
         if not env_times or not env_values:
             print("Warning: Empty envelope times or values.")
@@ -77,19 +70,19 @@ class ShowStructurer:
         return envelope_function
 
     def _setfixture(self, fixture, channel, value, comment=""):
-        if value > 255:
-            value = 255
-        if value < 0:
-            value = 0
+        value = max(0, min(255, value))
+        return (fixture, channel, value)
+        
+    def _qlc_setfixture(self, fixture, channel, value, comment=""):
         return f"setfixture:{fixture} ch:{channel} val:{value} //{comment}"
 
     def _wait(self, time, comment=""):
-        if time < 0:
-            time = 0
-        return f"wait:{int(time)} //{comment}"
+        time = max(0, int(round(float(time))))
+        return int(time)
     
-    def _blackout(self, mode, comment=""):
-        return f"blackout:{mode} //{comment}"
+    def _qlc_wait(self, time, comment=""):
+        time = max(0, int(round(float(time))))
+        return f"wait:{int(time)} //{comment}"
     
     def _execute(self, command, comment=""):
         return f"systemcommand:{command} //{comment}"
@@ -686,62 +679,6 @@ class ShowStructurer:
         result["queue"] = idle_queue
         return result
     
-    def pause(self, length, type="blackout", start=0, queuename="pause"):
-        result = {}
-        result["name"] = queuename
-        if type == "blackout":
-            blackout_queue = Queue()
-            blackout_queue.enqueue(start)
-            temp = []
-            temp.append(self._blackout("on", f"Blackout for {length} seconds"))
-            blackout_queue.enqueue(temp)
-            wait = length * 1000
-            blackout_queue.enqueue(wait)
-            temp = []
-            temp.append(self._blackout("off", f"Blackout off"))
-            blackout_queue.enqueue(temp)
-            result["queue"] = blackout_queue
-
-        if type == "beams":
-            result = {}
-            result["name"] = "pause"
-            group = self.universe["abovemoving"]
-            othergroups = []
-            if "abovewash" in self.universe:
-                othergroups.append(self.universe["abovewash"])
-            if "flood" in self.universe:
-                othergroups.append(self.universe["flood"])
-            if "strobe" in self.universe:
-                othergroups.append(self.universe["strobe"])
-            beam_queue = Queue()
-            beam_queue.enqueue(0)
-            temp = []
-            wait = 200
-            time = length*1000 - wait
-            speed = self.calculate_tilt_speed(group["1"], 74, time/1000)
-            for group in othergroups:
-                for fixture in group.values():
-                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
-            beam_queue.enqueue(temp)
-            beam_queue.enqueue(0)
-            temp = []
-            for fixture in group.values():
-                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer off"))
-                temp.append(self._setfixture(fixture["id"], fixture["movespeed"], 0, f"Set move speed"))
-                temp.append(self._setfixture(fixture["id"], fixture["pan"], 127, f"Pan to 127"))
-                temp.append(self._setfixture(fixture["id"], fixture["tilt"], 100, f"Tilt to 100"))
-            beam_queue.enqueue(temp)
-            beam_queue.enqueue(wait)
-            temp = []
-            for fixture in group.values():
-                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"Dimmer on"))
-                temp.append(self._setfixture(fixture["id"], fixture["movespeed"], speed, f"Set move speed"))
-                temp.append(self._setfixture(fixture["id"], fixture["tilt"], 0, f"Tilt to 0"))
-            beam_queue.enqueue(temp)
-            beam_queue.enqueue(time)
-            result["queue"] = beam_queue
-        return result
-    
     def reset_position(self, queuename="reset1"):
         result = {}
         result["name"] = queuename
@@ -799,7 +736,7 @@ class ShowStructurer:
         strobe_queue.enqueue(reset)
         strobe_queue.enqueue(0)
         
-        update_period = 10  # ms
+        update_period = 33  # ms
         
         while time > 1:
             # Select a new light and color every light_selection_period ms
@@ -831,7 +768,7 @@ class ShowStructurer:
                         if j == active_fixtures[set_index]:
                             colors = self.calculate_colors(fixture, color)
                             temp += colors
-                            temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 255, f"Dimmer on"))
+                            temp.append(self._setfixture(fixture["id"], fixture["dimmer"], 0, f"Dimmer on"))
                             temp.append(self._setfixture(fixture["id"], fixture["strobe"], fixture["nicestrobe"], f"Strobe on"))
                             fixturedimmers[fixture["id"]] = 255
                         elif fixturedimmers[fixture["id"]] > 0:
@@ -1135,17 +1072,15 @@ class ShowStructurer:
         result["queue"] = colorpulse_queue
         return result
     
-    #### this is the meat and potatoes here ####
-    def combine(self, queues, end_time=None, seperate_dimmer=True, light_strength_envelope=None, strobe_ranges=None):
+    def combine(self, queues, end_time=None, seperate_dimmer=True, strobe_ranges=None):
         """
         Combines multiple fixture/wait command queues into a single sequence per time segment.
-        If needed, keeps track of fixture dimmer values separately and applies envelope scaling.
+        If needed, keeps track of fixture dimmer values separately
 
         Args:
             queues: List of queue dictionaries [wait, [command1, command2, ...], wait, ...]
             start_time: Start of the segment -- time offset from the beginning of the song
             seperate_dimmer: If True, separate dimmer commands from main commands
-            light_strength_envelope: Envelope for scaling dimmer values (based on beat and snare/kick pattern)
             strobe_ranges: List of tuples defining strobe ranges (start, end) in milliseconds
             
         Returns:
@@ -1154,12 +1089,6 @@ class ShowStructurer:
             Dimmer commands in dimmer_segment if seperate_dimmer is True, otherwise None.\n
             The lists consist of QLC+ commands for a script
         """
-
-        # Check if envelope is provided and initialize the envelope function
-        if light_strength_envelope:
-            envelope_function = self._light_strength_envelope_function(light_strength_envelope)
-        else:
-            envelope_function = lambda t: 1.0  # No scaling if no envelope is provided
 
         # Main pattern commands (excluding dimmer commands)
         segment = []
@@ -1174,23 +1103,11 @@ class ShowStructurer:
         if end_time is None:
             end_time = float('inf')
         current_time_ms = 0
-        current_time_sec = current_time_ms / 1000.0
-        
-        # Update frequency for dimmer scaling during frequent updates
-        update_frequency_ms = self.dimmer_update_fq
-        
-        # Check current script type
-        is_slowflash = False
-        is_pause = False
 
         # Initialize command_queues based on provided chaser queues
         command_queues = {}
         for queue in queues:
             command_queues[queue["name"]] = queue["queue"]
-            if "slowflash" in queue["name"]:
-                is_slowflash = True
-            if "pause" in queue["name"]:
-                is_pause = True
         
         # Dictionary to keep track of the next wait time for each queue
         times = {}
@@ -1249,50 +1166,13 @@ class ShowStructurer:
             if in_strobe_range and exiting_strobe_range:
                 # Wait till strobe range end + 1 ms
                 wait_time = wait_time_till_strobe + 1
-            
-            # Check if we need to insert dynamic dimmer updates during this wait
-            dimmer_condition = (
-                wait_time > update_frequency_ms and
-                light_strength_envelope and
-                fixture_dimmers and
-                seperate_dimmer and
-                not in_strobe_range and
-                not is_pause
-            )
-
-            # Initialize variable to check if dimmer updates were found
-            found_updates = False
-
-            # If needed, udpdate dimmers script:
-            if dimmer_condition:
-                active_ranges = light_strength_envelope.get("active_ranges", []) # ranges where the envelope is active
-                # Add dynamic dimmer updates during this wait period
-                found_updates = self._add_dynamic_dimmer_updates(
-                    segment_dimmers, fixture_dimmers, 
-                    wait_time, current_time_ms, update_frequency_ms, 
-                    envelope_function=envelope_function,
-                    active_ranges=active_ranges
-                )
-
-            # Add comments for debugging in QLC+
-            if entering_strobe_range:
-                comment = f"Time: {current_time_sec}. Entering range ({strobe_range[0]} - {strobe_range[1]})"
-            elif in_strobe_range:
-                comment = f"Time: {current_time_sec}. In range ({strobe_range[0]} - {strobe_range[1]})"
-            elif exiting_strobe_range:
-                comment = f"Time: {current_time_sec}. Exiting range ({strobe_range[0]} - {strobe_range[1]})"
-            else:
-                comment = f"Time: {current_time_sec}."
 
             # Add the remaining wait time to the script
-            segment.append(self._wait(wait_time, comment))
-
-            # If no dimmer updates were needed / or condition not met, add same wait time for dimmer script
-            if seperate_dimmer and not found_updates:
-                segment_dimmers.append(self._wait(wait_time, comment))
+            segment.append(self._wait(wait_time))
+            if seperate_dimmer:
+                segment_dimmers.append(self._wait(wait_time))
             
             current_time_ms += wait_time # Update current time
-            current_time_sec = current_time_ms / 1000.0
             
             # Reduce wait time from all script queues
             for name in times:
@@ -1308,8 +1188,7 @@ class ShowStructurer:
             # If we are exiting a strobe range, we need to restore fixture states
             if exiting_strobe_range:
                 segment, segment_dimmers = self.restore_fixture_states(
-                    fixture_dimmers, segment, segment_dimmers, current_time_sec, envelope_function
-                )
+                    fixture_dimmers, segment, segment_dimmers)
                 continue
                     
             #### PROCESS COMMANDS ####
@@ -1325,45 +1204,24 @@ class ShowStructurer:
             
             if q[0] not in do_not_execute:
                 for command in commands:
-                    # Extract fixture ID, channel and value from the QLC+ command
-                    match = re.search(r'setfixture:(\d+) ch:(\d+) val:(\d+)', command)
-                    if match:
-                        fixture_id, channel, value = match.groups()
-                        fixture_id = int(fixture_id)
-                        channel = int(channel)
-                        original_value = int(value)
-                        
-                        # Store this fixture state for later restoration
-                        if fixture_id not in fixture_dimmers:
-                            fixture_dimmers[fixture_id] = {}
-                        fixture_dimmers[fixture_id][channel] = original_value
-                        
-                        # Only add commands to script if not in a strobe range
-                        if not in_strobe_range:
-                            # If command is a dimmer command and we are using envelope, we need to scale it with the envelope
-                            is_dimmer_command = (fixture_id in self.fixture_dimmer_map and 
-                                            channel == self.fixture_dimmer_map[fixture_id])
-                            
-                            if is_dimmer_command and seperate_dimmer:
-                                # Get current envelope strength
-                                strength = envelope_function(current_time_sec)
-                                
-                                if is_slowflash:
-                                    # In the case of slowflash chaser, we don't scale the value
-                                    scaled_value = original_value
-                                else:
-                                    scaled_value = int(original_value * strength)
-                                
-                                # Add dimmer command to the script
-                                dimmer_command = self._setfixture(fixture_id, channel, scaled_value,
-                                                                f"Scaled value {scaled_value} from {original_value}")
-                                segment_dimmers.append(dimmer_command)
-                            else:
-                                # if not dimmer command, just add the command as is
-                                segment.append(command)
-                    elif not in_strobe_range:
-                        # realistically we should not get here, but if we do, just add the command
-                        segment.append(command)
+                    fixture_id, channel, original_value = command
+                    # Store this fixture state for later restoration
+                    if fixture_id not in fixture_dimmers:
+                        fixture_dimmers[fixture_id] = {}
+                    fixture_dimmers[fixture_id][channel] = original_value
+                    
+                    # Only add commands to script if not in a strobe range
+                    if not in_strobe_range:
+                        is_dimmer_command = (fixture_id in self.fixture_dimmer_map and 
+                                        channel == self.fixture_dimmer_map[fixture_id])
+                        if is_dimmer_command and seperate_dimmer:
+                            # Add dimmer command to the script
+                            dimmer_command = self._setfixture(fixture_id, channel, original_value,
+                                                            f"Scaled value {original_value} from {original_value}")
+                            segment_dimmers.append(dimmer_command)
+                        else:
+                            # if not dimmer command, just add the command as is
+                            segment.append(command)
 
             # Get next wait period
             wait = queue.dequeue()
@@ -1373,51 +1231,51 @@ class ShowStructurer:
         return segment, segment_dimmers
 
     def check_strobe_ranges(self, current_time_ms, wait_time, strobe_ranges):
-        """ Checks if we are entering, in, or exiting a strobe range.
+        """Checks if we are entering, in, or exiting a strobe range.
 
-        Args:
-            current_time_ms (_type_): Current time relative to segment start
-            wait_time (_type_): Current next wait time in milliseconds
-            strobe_ranges (_type_): List of tuples defining strobe ranges (start, end) in seconds
-
-        Returns:
-            Tuple of (entering_strobe_range, in_strobe_range, exiting_strobe_range, wait_time_till_strobe, strobe_range)
+        strobe_ranges: List of (start_sec, end_sec), segment-local seconds.
         """
         entering_strobe_range = False
         in_strobe_range = False
         exiting_strobe_range = False
-        wait_time_till_strobe = wait_time
+        wait_time_till_strobe = int(round(float(wait_time)))
         strobe_range = None
 
-        # Check if we are in a strobe range
         if strobe_ranges:
-            current_time_sec = current_time_ms / 1000.0
-            end_time_sec = current_time_sec + wait_time /1000.0
-            
-            for strobe_range in strobe_ranges:
-                if strobe_range[0] <= current_time_sec <= strobe_range[1]:
+            current_time_sec = float(current_time_ms) / 1000.0
+            end_time_sec = current_time_sec + (float(wait_time) / 1000.0)
+
+            # In range: [start, end)  (end exclusive prevents "sticky" end)
+            for r in strobe_ranges:
+                start, end = float(r[0]), float(r[1])
+                if start <= current_time_sec < end:
                     in_strobe_range = True
+                    strobe_range = (start, end)
                     break
 
-            # Check if we are entering a strobe range
+            # Entering if start happens within (current, end] (start inclusive at end boundary)
             if not in_strobe_range:
-                for strobe_range in strobe_ranges:
-                    if current_time_sec < strobe_range[0] < end_time_sec:
+                for r in strobe_ranges:
+                    start, end = float(r[0]), float(r[1])
+                    if current_time_sec < start <= end_time_sec:
                         entering_strobe_range = True
-                        wait_time_till_strobe = (strobe_range[0] - current_time_sec) * 1000
+                        # round to int ms; ensure we don't produce a 0ms "advance" due to float noise
+                        ms = int(round((start - current_time_sec) * 1000.0))
+                        wait_time_till_strobe = max(1, ms) if ms > 0 else 1
+                        strobe_range = (start, end)
                         break
 
-            # Check if we are exiting a strobe range
-            if in_strobe_range:
-                for strobe_range in strobe_ranges:
-                    if current_time_sec < strobe_range[1] < end_time_sec:
-                        exiting_strobe_range = True
-                        wait_time_till_strobe = (strobe_range[1] - current_time_sec) * 1000
-                        break
+            # Exiting if end happens within (current, end] (end inclusive at boundary)
+            if in_strobe_range and strobe_range is not None:
+                start, end = strobe_range
+                if current_time_sec < end <= end_time_sec:
+                    exiting_strobe_range = True
+                    ms = int(round((end - current_time_sec) * 1000.0))
+                    wait_time_till_strobe = max(1, ms) if ms > 0 else 1
 
         return entering_strobe_range, in_strobe_range, exiting_strobe_range, wait_time_till_strobe, strobe_range
 
-    def restore_fixture_states(self, fixture_dimmers, segment, segment_dimmers, current_time_sec, envelope_function):
+    def restore_fixture_states(self, fixture_dimmers, segment, segment_dimmers):
         """
         Restores the fixture dimmer states to their original values. This is done when exiting a strobe range.
         
@@ -1431,7 +1289,6 @@ class ShowStructurer:
         for fixture_id, info in fixture_dimmers.items():
             for channel, value in info.items():
                 if channel == self.fixture_dimmer_map.get(fixture_id, None):
-                    value = value * envelope_function(current_time_sec)
                     dimmer_command = self._setfixture(fixture_id, channel, value, 
                                                         f"Restoring original value {value}")
                     segment_dimmers.append(dimmer_command)
@@ -1439,105 +1296,6 @@ class ShowStructurer:
                     cmd = self._setfixture(fixture_id, channel, value)
                     segment.append(cmd)
         return segment, segment_dimmers
-
-    def _add_dynamic_dimmer_updates(self, segment_dimmers, fixture_dimmers, 
-                            wait_time, current_time_ms, update_frequency_ms,
-                            envelope_function, active_ranges=None):
-        """
-        Adds dynamic dimmer updates during long wait periods based on envelope values.
-        Uses pre-calculated active ranges that contain a deviation in dimmer strength.
-        Handles strobe ranges by stopping updates at strobe boundaries.
-        
-        Args:
-            segment: Main command segment
-            segment_dimmers: Dimmer command segment
-            fixture_dimmers: Dictionary of current fixture dimmer values
-            wait_time: Total wait time in ms
-            current_time_ms: Current time position in ms 
-            update_frequency_ms: Update frequency in ms
-            envelope_function: Function that returns envelope strength at given time
-            active_ranges: List of active envelope ranges with start_ms and end_ms
-        """
-
-        # Use active ranges for precise updates
-        wait_end_ms = current_time_ms + wait_time
-        
-        # Find active ranges that overlap with our current wait period
-        relevant_ranges = [
-            r for r in active_ranges 
-            if r['end_ms'] >= current_time_ms and r['start_ms'] <= wait_end_ms
-        ]
-        
-        if not relevant_ranges:
-            return False
-        
-        # Sort ranges by start time
-        relevant_ranges.sort(key=lambda r: r['start_ms'])
-        
-        # Process each range
-        remaining_wait = wait_time
-        update_time_ms = current_time_ms
-        
-        for range_idx, active_range in enumerate(relevant_ranges):
-            # Calculate time to the start of this range if it's in the future
-            if active_range['start_ms'] > update_time_ms:
-                wait_to_range = active_range['start_ms'] - update_time_ms
-                if wait_to_range > 0:
-                    # Wait until the start of this active range
-                    segment_dimmers.append(self._wait(self.adjusted_wait(wait_to_range), f"Wait until range at {active_range['start_ms']/1000}s"))
-                    update_time_ms += wait_to_range
-                    remaining_wait -= wait_to_range
-                    
-                    if remaining_wait <= 0:
-                        break
-            
-            # Calculate how much time we spend in this active range
-            range_end_capped = min(active_range['end_ms'], wait_end_ms)
-            time_in_range = range_end_capped - update_time_ms
-            
-            # Apply updates while in the active range
-            range_time_remaining = time_in_range
-            while range_time_remaining > 0:
-                update_chunk = min(update_frequency_ms, range_time_remaining)
-                segment_dimmers.append(self._wait(self.adjusted_wait(update_chunk), f"Update in active range {active_range['max_value']:.2f}"))
-                update_time_ms += update_chunk
-                
-                strength = envelope_function(update_time_ms / 1000.0)
-                
-                for fixture_id, info in fixture_dimmers.items():
-                    for channel, value in info.items():
-                        if channel == self.fixture_dimmer_map.get(fixture_id, None):
-                            scaled_value = int(value * strength)
-                            dimmer_command = self._setfixture(fixture_id, channel, scaled_value, 
-                                                            f"Scaled value {scaled_value} from {value}")
-                            segment_dimmers.append(dimmer_command)
-                
-                range_time_remaining -= update_chunk
-                remaining_wait -= update_chunk
-                
-                if remaining_wait <= 0:
-                    break
-            
-            # If we've used all our wait time, exit
-            if remaining_wait <= 0:
-                break
-            
-            # If there's another range coming up, wait between ranges
-            if range_idx < len(relevant_ranges) - 1:
-                next_range = relevant_ranges[range_idx + 1]
-                wait_between_ranges = next_range['start_ms'] - update_time_ms
-                wait_between_ranges = min(wait_between_ranges, remaining_wait)
-                
-                if wait_between_ranges > 0:
-                    segment_dimmers.append(self._wait(wait_between_ranges, f"Wait between ranges"))
-                    update_time_ms += wait_between_ranges
-                    remaining_wait -= wait_between_ranges
-        
-        # If we have remaining wait time after all ranges, add final wait
-        if remaining_wait > 0:
-            segment_dimmers.append(self._wait(remaining_wait, f"Finished, wait for {remaining_wait}ms"))
-
-        return True
     
     def preprocess_onset_ranges(self, start_time, end_time, onset_ranges):
         """
@@ -1566,16 +1324,16 @@ class ShowStructurer:
                 
             # Adjust start if needed
             if onset_start < start_time:
-                # If onset starts before our segment, adjust to 0.1s after segment start
-                adjusted_start = 0.1
+                # If onset starts before our segment, adjust
+                adjusted_start = 0.05
             else:
                 # Otherwise shift relative to segment start
                 adjusted_start = onset_start - start_time
                 
             # Adjust end if needed
             if onset_end > end_time:
-                # If onset ends after our segment, adjust to 0.1s before segment end
-                adjusted_end = segment_duration - 0.1
+                # If onset ends after our segment, adjust
+                adjusted_end = segment_duration - 0.05
             else:
                 # Otherwise shift relative to segment start
                 adjusted_end = onset_end - start_time
@@ -1588,19 +1346,20 @@ class ShowStructurer:
         
         return processed_ranges
 
-    def generate_show(self, name, qxw, delay, strobes=False, simple=False):
+    def generate_show(self, name, qxw, strobes, simple, qlc_delay, qlc_lag):
         """
             Generates all functions, buttons, etc. for a QLC+ file. 
         Args:
             name (str): Name of the show to generate
             qxw (Object): object that handles qlc+ file generation 
             strobes (bool, optional): Whether or not to include strobe effects. Defaults to False.
-            delay (int, optional): Delay in milliseconds to sync lights with music. Defaults to 500
             simple (bool, optional): Whether to use simple mode (only a simple color chaser). Defaults to False.
+            qlc_delay (int, optional): Delay in ms to add to each QLC+ script
+            qlc_lag (int, optional): Used to scale wait times down to account for lag
         """
         print(f"----Combining scripts for show")
-        # delay for powershell command to sync song and lightshow start
-        scripts = [] # list to hold all of the scripts for file
+        ola_scripts = []  # OLA scripts
+        qlc_scripts = []  # QLC+ scripts
         function_names = [] # list that holds names of beforementioned scripts
         show = self.create_show(name) # holds information about song
         sections = show.struct["chorus_sections"] # energetic segments of the song
@@ -1657,20 +1416,32 @@ class ShowStructurer:
             onset_parts = show.struct["onset_parts"]
             for part in onset_parts:
                 queues = []
-                queues.append(self.randomstrobe(name, show, length=part[1]*1000-part[0]*1000, start=part[0]*1000 + delay, queuename=f"strobe{part[0]}", light_selection_period=50))
-                scripts.append(self.combine(queues)[0])
-                function_names.append(f"strobe{part[0]}")
+                queues.append(self.randomstrobe(name, show,
+                                                length=part[1]*1000-part[0]*1000,
+                                                start=part[0]*1000,
+                                                queuename=f"strobe{part[0]}",
+                                                light_selection_period=50))
+                # Combine returns (main, dimmers). Keep both.
+                ola_script, ola_dimmers = self.combine(queues)
 
-        # Add scripts for each pause (blackout) in the song
-        queues = []
-        pauses = show.struct["silent_ranges"]
-        for pause in pauses:
-            pause_start = pause[0] / 43
-            pause_end = pause[1] / 43
-            pausename = f"pause{str(pause[0])[:5]}"
-            queues.append(self.pause((pause_end - pause_start), type="blackout", queuename=pausename, start=pause_start*1000 + delay))
-        scripts.append(self.combine(queues)[0])
-        function_names.append("pauses")
+                # OLA: append both tracks
+                ola_scripts.append(ola_script)
+                ola_scripts.append(ola_dimmers)
+
+                # QLC+: queue (no lag), dimmers (with lag scaling)
+                qlc_queue = self.convert_scripts_to_qlc_format([ola_script],
+                                                               qlc_delay=qlc_delay,
+                                                               qlc_lag=1.0,
+                                                               is_dimmer=False)[0]
+                qlc_dim = self.convert_scripts_to_qlc_format([ola_dimmers],
+                                                             qlc_delay=qlc_delay,
+                                                             qlc_lag=qlc_lag,
+                                                             is_dimmer=True)[0]
+                qlc_scripts.append(qlc_queue)
+                qlc_scripts.append(qlc_dim)
+
+                function_names.append(f"strobe{part[0]}")
+                function_names.append(f"strobe{part[0]}_dimmers")
 
         # Add scripts for each segment in the song
         i = 0
@@ -1679,8 +1450,8 @@ class ShowStructurer:
         onefocus = (len(show.struct["focus"]) == 1) # check how many segments are energetic i.e. verse/chorus/inst
 
         for i in range(i, len(segments)):
-            start_time = segments[i]["start"]*1000 + delay
-            end_time = segments[i]["end"]*1000 + delay
+            start_time = segments[i]["start"]*1000
+            end_time = segments[i]["end"]*1000
             length = (segments[i]["end"] - segments[i]["start"])*1000
             queues = []
             found = False
@@ -1720,22 +1491,358 @@ class ShowStructurer:
 
             if strobes and onset_parts:
                 strobe_ranges = self.preprocess_onset_ranges(segments[i]["start"], segments[i]["end"], onset_parts)
-            light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]
+            else:
+                strobe_ranges = None
+
             segment_queue, segment_dimmers = self.combine(
                 queues,
                 end_time=end_time,
-                light_strength_envelope=light_strength_envelope,
-                strobe_ranges=strobe_ranges if strobes else None,
+                strobe_ranges=strobe_ranges,
             )
-            scripts.append(segment_queue)
-            scripts.append(segment_dimmers)
+            light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]
+            segment_dimmers = self.scale_dimmer_with_envelope(segment_dimmers, light_strength_envelope)
+
+            # OLA scripts
+            ola_scripts.append(segment_queue)
+            ola_scripts.append(segment_dimmers)
+
+            # QLC+ scripts (queue and dimmer, lag scaling only on dimmer)
+            qlc_scripts.append(self.convert_scripts_to_qlc_format([segment_queue], qlc_delay=qlc_delay, qlc_lag=1.0, is_dimmer=False)[0])
+            qlc_scripts.append(self.convert_scripts_to_qlc_format([segment_dimmers], qlc_delay=qlc_delay, qlc_lag=qlc_lag, is_dimmer=True)[0])
+
             function_names.append(str(segments[i]["start"]))
             function_names.append(str(segments[i]["start"]) + "_dimmers")
-            i += 1
-        
-        return scripts, function_names
+
+        ola_result = self.combine_scripts_to_ola_format(ola_scripts)
+
+        result = {
+            "ola": ola_result,
+            "qlc": {
+                "scripts": qlc_scripts,
+                "function_names": function_names
+            }
+        }
+        return result
+    
+    def scale_dimmer_with_envelope(self, segment_dimmers, light_strength_envelope):
+        """
+        Scale dimmer values in a segment_dimmers script using a light strength envelope.
+
+        segment_dimmers format (OLA mode):
+            [wait_ms, (fixture_id, channel, value), (fixture_id, channel, value), ..., wait_ms, ...]
+
+        Timing rule (SEGMENT-LOCAL envelope):
+          - The first wait is the start offset relative to song beginning.
+            It MUST be preserved, but MUST NOT be included in the envelope time.
+          - Envelope time starts at t=0 right after the first wait.
+          - We continuously apply scaling inside envelope active ranges by re-emitting
+            scaled dimmer values at a fixed update frequency (self.dimmer_update_fq).
+
+        Scaling rule:
+          - Only scale when current seg time is inside light_strength_envelope["active_ranges"].
+          - Scaling uses the latest *unscaled* value last set by the original script.
+        """
+        if not segment_dimmers:
+            return segment_dimmers
+
+        envelope_fn = self._light_strength_envelope_function(light_strength_envelope)
+        active_ranges = (light_strength_envelope or {}).get("active_ranges", []) or []
+        ranges = sorted(
+            [
+                {
+                    "start_ms": int(r.get("start_ms", 0)),
+                    "end_ms": int(r.get("end_ms", 0)),
+                }
+                for r in active_ranges
+                if r is not None
+            ],
+            key=lambda r: r["start_ms"],
+        )
+
+        update_frequency_ms = int(getattr(self, "dimmer_update_fq", 33)) or 33
+        update_frequency_ms = max(1, update_frequency_ms)
+
+        def _scale(v, t_ms):
+            strength = float(envelope_fn(t_ms / 1000.0))
+            return max(0, min(255, int(round(float(v) * strength))))
+
+        def _range_state(t_ms, idx):
+            n = len(ranges)
+            while idx < n and t_ms >= ranges[idx]["end_ms"]:
+                idx += 1
+            if idx < n:
+                r = ranges[idx]
+                if r["start_ms"] <= t_ms < r["end_ms"]:
+                    return idx, True
+            return idx, False
+
+        def _next_range_start(t_ms, idx):
+            idx2 = idx
+            n = len(ranges)
+            while idx2 < n and ranges[idx2]["end_ms"] <= t_ms:
+                idx2 += 1
+            if idx2 < n:
+                return ranges[idx2]["start_ms"]
+            return None
+
+        def _emit_scaled_snapshot(out, base_dimmers, t_ms):
+            if not base_dimmers:
+                return
+            batch = []
+            for (fixture_id, channel), base_val in base_dimmers.items():
+                batch.append((fixture_id, channel, _scale(base_val, t_ms)))
+            if len(batch) == 1:
+                out.append(batch[0])
+            else:
+                out.append(batch)
+
+        scaled = []
+
+        seg_ms = 0
+        saw_first_wait = False
+
+        base_dimmers = {}
+
+        range_idx = 0
+
+        def _in_active_range(t_ms):
+            nonlocal range_idx
+            range_idx, inside = _range_state(t_ms, range_idx)
+            return inside
+
+        def _process_wait(wait_ms):
+            """
+            Append waits, and when inside active ranges, insert periodic scaled snapshots.
+            This advances seg_ms by wait_ms (segment-local time).
+            """
+            nonlocal seg_ms, range_idx
+
+            wait_ms = int(round(float(wait_ms)))
+            wait_ms = max(0, wait_ms)
+            if wait_ms == 0:
+                return
+
+            end_ms = seg_ms + wait_ms
+
+            if not ranges or not base_dimmers:
+                scaled.append(wait_ms)
+                seg_ms = end_ms
+                return
+
+            while seg_ms < end_ms:
+                range_idx, inside = _range_state(seg_ms, range_idx)
+
+                if not inside:
+                    nxt = _next_range_start(seg_ms, range_idx)
+                    target = end_ms if nxt is None else min(end_ms, nxt)
+                    delta = target - seg_ms
+                    if delta > 0:
+                        scaled.append(int(delta))
+                        seg_ms += delta
+                    range_idx, now_inside = _range_state(seg_ms, range_idx)
+                    if now_inside:
+                        _emit_scaled_snapshot(scaled, base_dimmers, seg_ms)
+                    continue
+
+                r = ranges[range_idx]
+                range_end = min(r["end_ms"], end_ms)
+
+                next_tick = min(seg_ms + update_frequency_ms, range_end)
+                delta = next_tick - seg_ms
+                if delta > 0:
+                    scaled.append(int(delta))
+                    seg_ms = next_tick
+
+                range_idx, still_inside = _range_state(seg_ms, range_idx)
+                if still_inside:
+                    _emit_scaled_snapshot(scaled, base_dimmers, seg_ms)
+
+        def _process_command_tuple(tup):
+            nonlocal seg_ms
+            fixture_id, channel, value = tup
+            fixture_id = int(fixture_id)
+            channel = int(channel)
+            value = int(value)
+
+            base_dimmers[(fixture_id, channel)] = value
+
+            if _in_active_range(seg_ms):
+                return (fixture_id, channel, _scale(value, seg_ms))
+            return (fixture_id, channel, value)
+
+        for entry in segment_dimmers:
+            if isinstance(entry, int):
+                wait_ms = max(0, entry)
+
+                if not saw_first_wait:
+                    saw_first_wait = True
+                    scaled.append(wait_ms)
+                    continue
+
+                _process_wait(wait_ms)
+                continue
+
+            if isinstance(entry, tuple) and len(entry) == 3:
+                scaled.append(_process_command_tuple(entry))
+                continue
+
+            if isinstance(entry, list):
+                new_batch = []
+                for sub in entry:
+                    if isinstance(sub, tuple) and len(sub) == 3:
+                        new_batch.append(_process_command_tuple(sub))
+                    else:
+                        new_batch.append(sub)
+                scaled.append(new_batch)
+                continue
+
+            scaled.append(entry)
+
+        return scaled
+    
+    def combine_scripts_to_ola_format(self, scripts):
+        """
+        Merge multiple scripts (each: [wait_ms, (fixture_id, rel_channel, value), ..., wait_ms, ...])
+        into (frame_delays_ms, dmx_frames) for OLA.
+        Maps channel to absolute: abs_channel = self.fixture_addresses[fixture_id] + rel_channel
+        """
+        # Default tick ~30 Hz => minimum ~33 ms between scheduled frames
+        max_freq = 30.0
+        min_frame_interval_ms = 33 # int(round(1000.0 / max_freq))
+
+        def _is_command_tuple(x):
+            return isinstance(x, tuple) and len(x) == 3
+
+        def script_event_iterator(script):
+            idx = 0
+            n = len(script)
+            while idx < n:
+                entry = script[idx]
+                if not isinstance(entry, int):
+                    idx += 1
+                    continue
+
+                wait_ms = max(0, entry)
+                idx += 1
+
+                commands = []
+                while idx < n and not isinstance(script[idx], int):
+                    cmd = script[idx]
+                    if _is_command_tuple(cmd):
+                        commands.append(cmd)
+                    elif isinstance(cmd, list):
+                        for sub in cmd:
+                            if _is_command_tuple(sub):
+                                commands.append(sub)
+                    idx += 1
+
+                yield wait_ms, commands
+
+        all_scripts = [s for s in (scripts or []) if isinstance(s, list) and s]
+
+        script_states = []
+        for script in all_scripts:
+            it = script_event_iterator(script)
+            try:
+                wait_ms, commands = next(it)
+            except StopIteration:
+                continue
+            script_states.append({"iter": it, "next_wait": wait_ms, "pending": commands})
+
+        if not script_states:
+            return [0], [array.array("B", [0] * self.universe_size)]
+
+        current_levels = [0] * self.universe_size
+        dmx_frames = []
+        frame_delays_ms = []
+
+        while script_states:
+            min_wait = min(s["next_wait"] for s in script_states)
+
+            if min_wait == 0:
+                ready = [s for s in script_states if s["next_wait"] == 0]
+                for state in ready:
+                    for fixture_id, rel_channel, value in state["pending"]:
+                        # Map to absolute channel
+                        abs_channel = self.fixture_addresses[fixture_id] + rel_channel
+                        if isinstance(abs_channel, int) and 1 <= abs_channel <= self.universe_size:
+                            current_levels[abs_channel - 1] = max(0, min(255, int(value)))
+                    try:
+                        wait_ms, commands = next(state["iter"])
+                        state["next_wait"] = max(0, int(wait_ms))
+                        state["pending"] = commands
+                    except StopIteration:
+                        script_states.remove(state)
+                continue
+
+            advance_ms = round(min_wait)
+
+            dmx_frames.append(array.array("B", current_levels))
+            frame_delays_ms.append(advance_ms)
+
+            for state in script_states:
+                state["next_wait"] = max(0, state["next_wait"] - advance_ms)
+
+        blackout = array.array("B", [0] * self.universe_size)
+        dmx_frames.append(blackout)
+        frame_delays_ms.append(min_frame_interval_ms)
+
+        result = {}
+        result["frame_delays_ms"] = frame_delays_ms
+        result["dmx_frames"] = dmx_frames
+
+        return result
+    
+
+    def convert_scripts_to_qlc_format(self, scripts, qlc_delay, qlc_lag, is_dimmer=False):
+        qlc_delay = int(round(float(qlc_delay) * 1000))
+
+        def _is_cmd_tuple(x):
+            return isinstance(x, tuple) and len(x) == 3
+
+        def _emit(entry, out, is_first_wait, lag_accum):
+            if isinstance(entry, int):
+                wait_time = entry
+                if is_first_wait[0]:
+                    wait_time += qlc_delay
+                    is_first_wait[0] = False
+                    out.append(self._qlc_wait(wait_time))
+                elif is_dimmer:
+                    # Improved: accumulate fractional milliseconds for smooth scaling
+                    scaled = wait_time * qlc_lag + lag_accum[0]
+                    wait_scaled = int(scaled)
+                    lag_accum[0] = scaled - wait_scaled
+                    # Always emit at least 1 ms if original wait was > 0
+                    if wait_time > 0 and wait_scaled == 0:
+                        wait_scaled = 1
+                        lag_accum[0] -= (1 - scaled)
+                    out.append(self._qlc_wait(wait_scaled))
+                else:
+                    out.append(self._qlc_wait(wait_time))
+            elif _is_cmd_tuple(entry):
+                fixture, channel, value = entry
+                out.append(self._qlc_setfixture(fixture, channel, value, ""))
+            elif isinstance(entry, list):
+                for sub in entry:
+                    _emit(sub, out, is_first_wait, lag_accum)
+            elif isinstance(entry, str):
+                out.append(entry)
+
+        qlc_scripts = []
+        for script in scripts:
+            if not isinstance(script, list):
+                continue
+            script_copy = script.copy()
+            out = []
+            is_first_wait = [True]
+            lag_accum = [0.0]  # Accumulate fractional ms across all waits
+            for entry in script_copy:
+                _emit(entry, out, is_first_wait, lag_accum)
+            qlc_scripts.append(out)
+        return qlc_scripts
 
     def add_chasers(self, name, show, handler):
+        return # Disabled for now
         handler.add_button(name, "BLACKOUT", "blackout", 1)
 
         queues = []

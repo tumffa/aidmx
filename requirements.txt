@@ -81,3 +81,4 @@ treetable==0.2.6
 triton==2.1.0
 typing_extensions==4.12.2
 urllib3==2.5.0
+pygame==2.6.1

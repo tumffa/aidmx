@@ -20,10 +20,12 @@ try:
     os.makedirs(f"{demix_path}/htdemucs", exist_ok=True)
     os.makedirs(f"{data_path}/songs", exist_ok=True)
     os.makedirs(f"{data_path}/shows", exist_ok=True)
+    os.makedirs(f"{data_path}/ola_shows", exist_ok=True)
     print(f"Created struct path: {struct_path}")
     print(f"Created demix path: {demix_path}/htdemucs")
     print(f"Created song path: {data_path}/songs")
     print(f"Created shows path: {data_path}/shows")
+    print(f"Created ola shows path: {data_path}/ola_shows")
     # Create empty songdata.json
     with open(f"{data_path}/songdata.json", "w") as file:
         file.write("{}")
