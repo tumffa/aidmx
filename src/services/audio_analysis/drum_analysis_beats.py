@@ -103,17 +103,6 @@ def analyze_drum_beat_pattern(demix_path, beats=None, segments=None):
 
         # Find kick/snare hits that define the beat
         find_beat_defining_hits(segment, beat_kick_matches, beat_snare_matches)
-
-        # Calculate the light strength envelope
-        light_envelope = calculate_light_strength_envelope(segment)
-        
-        # Add it to the segment's drum analysis
-        segment["drum_analysis"]["light_strength_envelope"] = light_envelope
-
-
-    print(f"--------Calculated dimmer scaling function for {len(segments)} segments ({segments[0]['start']:.2f}s to {segments[-1]['end']:.2f}s)")
-
-    return segments
     
 def analyze_component(audio, onset_env, component_name, start_time, end_time):
     onset_times_with_strength = extract_component_hits(

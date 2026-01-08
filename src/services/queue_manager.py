@@ -53,7 +53,7 @@ class QueueManager:
             self.qlc, 
             strobes=strobes, 
             simple=simple, 
-            qlc_delay=qlc_delay, 
+            qlc_delay=qlc_delay,
             qlc_lag=qlc_lag)
 
         scripts = scripts_dict["qlc"]["scripts"]

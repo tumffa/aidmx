@@ -1,14 +1,16 @@
 import librosa
 import numpy as np
 from src.services.audio_analysis import drum_analysis_strobes
-from src.services.audio_analysis import drum_analysis_beats
 from src.services.audio_analysis.seperate_drums_larsnet import separate_drums_with_larsnet
+from src.services.audio_analysis.light_strength_envelope import calculate_light_strength_envelope
 
 def analyze_audio(song_data, struct_data):
     params = []
     params += initialize_song_metrics(song_data, struct_data=struct_data)
     params += struct_stats(song_data, name=song_data.get("name"), struct_data=struct_data)
+    params += get_pauses(song_data.get("name"), struct_data)
     params += segment(song_data.get("name"), struct_data=struct_data)
+    params += calculate_light_strength_envelope(song_data, struct_data=struct_data)
     return params
 
 def initialize_song_metrics(song_data, struct_data):
@@ -32,14 +34,8 @@ def initialize_song_metrics(song_data, struct_data):
     larsnet_drums = kick_snare_toms["kick"] + kick_snare_toms["snare"] + kick_snare_toms["toms"]
     onset_parts = drum_analysis_strobes.get_onset_parts(segments=struct_data["segments"], input=larsnet_drums, sr=sr)
 
-    enriched_segments = drum_analysis_beats.analyze_drum_beat_pattern(
-        demix_path=song_data["demixed"], 
-        beats=struct_data["beats"], 
-        segments=struct_data["segments"])
-
     params=[
         {
-            "segments": enriched_segments,
             "total_rms": total_rms,
             "rms": rms.tolist(),
             "bass_rms": bass_rms.tolist(),
@@ -69,8 +65,7 @@ def segment(name, struct_data):
     Returns:
         params (list): List with a dictionary containing the chorus sections and pauses
     """
-    print(f"----Defining energetic sections and pauses")
-    pauses, silent_ranges = get_pauses(name, struct_data)
+    print(f"----Defining energetic sections")
     segments = struct_data['segments']
     chorus_sections = []
     added_sections = []
@@ -145,8 +140,8 @@ def segment(name, struct_data):
             added_sections.append(segment_start)
             continue
         i += 1
-    params=[{'chorus_sections': chorus_sections, "pauses": pauses, "silent_ranges": silent_ranges}]
-    print(f"----Found {len(chorus_sections)} energetic sections and {len(pauses)} pauses")
+    params=[{'chorus_sections': chorus_sections}]
+    print(f"----Found {len(chorus_sections)} energetic sections")
     return params
 
 def seperate_kick_toms_snare(song_data):
@@ -429,8 +424,9 @@ def get_pauses(name, struct_data):
             if abs(int(segment["start"] * fps) - section[1]) < 100:
                 silent_pre_segments.append((int(section[0]), int(section[1])))
                 break
-
-    return silent_pre_segments, quiet_ranges
+    
+    params = [{"pauses": silent_pre_segments, "silent_ranges": quiet_ranges}]
+    return params
 
 def get_pauses_for_segment(rms, threshold):
     rms = np.asarray(rms, dtype=np.float64)
