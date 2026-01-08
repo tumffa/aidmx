@@ -272,30 +272,32 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
     boundary_secs = 1.5
     seg_start_abs = float(segment.get("start", 0.0))
     seg_end_abs = float(segment.get("end", seg_start_abs))
-    # Compute song ends (absolute seconds)
     song_start_abs = 0.0
     song_end_abs = (float(total_frames) / float(fps)) if (total_frames is not None and fps > 0) else None
 
     for p in (pauses or []):
         start_f, end_f = int(p[0]), int(p[1])
+        info = p[2] if (isinstance(p, (list, tuple)) and len(p) >= 3) else None
+        drums_quiet = isinstance(info, dict) and bool(info.get("drums", False))
+        # Gate: only scale for pauses where drums are below threshold
+        if not drums_quiet:
+            continue
+
         ps = float(start_f) / fps
         pe = float(end_f) / fps
         if pe <= ps:
             continue
 
-        # Detect boundary-straddling or proximity
         crosses_start = (ps <= seg_start_abs <= pe)
         crosses_end = (ps <= seg_end_abs <= pe)
         near_start = (pe >= seg_start_abs - boundary_secs) and (ps <= seg_start_abs + boundary_secs)
         near_end = (pe >= seg_end_abs - boundary_secs) and (ps <= seg_end_abs + boundary_secs)
         is_boundary_sensitive = crosses_start or crosses_end or near_start or near_end
 
-        # Fast ramp fraction near boundaries, normal otherwise
         ramp_ratio = 0.12 if is_boundary_sensitive else 0.33
         ramp_end = ps + (pe - ps) * ramp_ratio
-        ramp_end = min(ramp_end, pe)  # guard tiny pauses
+        ramp_end = min(ramp_end, pe)
 
-        # Apply attenuation: ramp down early, then hold zero
         in_ramp = (times_abs >= ps) & (times_abs <= ramp_end)
         if in_ramp.any():
             prog = (times_abs[in_ramp] - ps) / max(ramp_end - ps, 1e-12)
@@ -306,7 +308,6 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
         if in_hold.any():
             scale[in_hold] = 0.0
 
-    # Apply pause scaling first
     refined_values = values * scale
 
     # 2) Handle silent_ranges special cases: first and last ranges
@@ -368,7 +369,7 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
         merged = [rng[0]]
         for s, e in rng[1:]:
             ps, pe = merged[-1]
-            if s <= pe:  # overlap/adjacent
+            if s <= pe:
                 merged[-1] = (ps, max(pe, e))
             else:
                 merged.append((s, e))
@@ -377,10 +378,15 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
     existing_ranges = envelope.get("active_ranges", []) or []
     base_ranges_ms = [(int(r.get("start_ms", 0)), int(r.get("end_ms", 0))) for r in existing_ranges if r is not None]
 
-    # Pauses -> active ranges (segment-local), using ceil for start and floor for end
+    # Pauses -> active ranges (segment-local), gated by drums_quiet
     pause_ranges_ms = []
     for p in (pauses or []):
         start_f, end_f = int(p[0]), int(p[1])
+        info = p[2] if (isinstance(p, (list, tuple)) and len(p) >= 3) else None
+        drums_quiet = isinstance(info, dict) and bool(info.get("drums", False))
+        if not drums_quiet:
+            continue
+
         ps = float(start_f) / fps
         pe = float(end_f) / fps
         s_abs = max(ps, seg_start_abs)
@@ -391,7 +397,7 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
             if e_ms > s_ms:
                 pause_ranges_ms.append((s_ms, e_ms))
 
-    # Silent ranges that touch song start/end -> active ranges (segment-local)
+    # Silent ranges touching song edges (unchanged)
     silent_song_edges_ms = []
     for s in (silent_ranges or []):
         start_f = int(s[0]); end_f = int(s[1])
