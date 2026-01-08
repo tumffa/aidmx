@@ -97,10 +97,11 @@ Then, in the main directory, run:
 **To playback the OLA sequence and song**, run:
 
   ```
-  python3 ola_playback.py song_name [-d] [-u]
+  python3 ola_playback.py song_name [-d] [-u] [-s]
   ```
 - `-d` can be used to set the delay before DMX starts to sync it with song playback.
 - `-u` can be used to set the universe, default 1.
+- `-s` can be used to define the start time (in seconds)
 
 Alternatively, for more options through the command-line interface, run:
   ```

@@ -20,8 +20,8 @@ class CommandHandler:
         print("--Fraction -ql is used to downscale dimmer wait times for lag, scale down/up if beat flashes are too slow/fast")
         print("\ngenerate <audio_name> - Generate show with existing struct data for <audio_name>")
         print("--use 'sync' command first to sync struct data")
-        print("\nola <audio_name> [-od=SEC] [-u=N]")
-        print("--Play OLA show for <audio_name> with existing struct data with delay -od and universe -u")
+        print("\nola <audio_name> [-od=SEC] [-u=N] [-s=SEC]")
+        print("--Play OLA show for <audio_name> with existing struct data with delay -od, universe -u, and start time -s")
         print("\nfolder <queue_folder> - Analyze all tracks in a folder")
         print("\nmerge <audio_name> <folder> - Merge shows in folder into single showfile playlist (can be out of sync slightly)")
         print("\nsync - run this if there are previously analyzed struct files")
@@ -87,6 +87,7 @@ class CommandHandler:
             qlc_delay = None
             qlc_lag = None
             universe = None
+            start = 0.0
 
             for arg in command[1:]:
                 al = arg.lower()
@@ -102,11 +103,17 @@ class CommandHandler:
                     except ValueError:
                         print("Invalid universe value")
                         return
+                elif al.startswith('-s='):
+                    try:
+                        start = float(arg.split('=', 1)[1])
+                    except ValueError:
+                        print("Invalid start time value")
+                        return
                 elif not name:
                     name = arg
 
             if not name:
-                print("Usage: ola <audio_name> [-od=SEC] [-u=N]")
+                print("Usage: ola <audio_name> [-od=SEC] [-u=N] [-s=SEC]")
                 return
 
             if ola_delay is None or ola_delay < 0:

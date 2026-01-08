@@ -98,15 +98,9 @@ class DataManager:
 
         data = self.get_struct_data(audio_name)
         if "rms" not in data or "total_rms" or "larsnet_drums_y" not in data:
-            segments = self.get_struct_data_by_key(audio_name, "segments")
             struct_data = self.get_struct_data(audio_name)
-            params = audio_analysis.initialize_song_metrics(self.songs[audio_name], 
+            params = audio_analysis.analyze_audio(self.songs[audio_name], 
                                                     struct_data=struct_data)
-            self.update_struct_data(audio_name, params, indent=2)
-            struct_data = self.get_struct_data(audio_name)
-            params = audio_analysis.struct_stats(self.songs[audio_name], 
-                                                       audio_name, 
-                                                       struct_data=struct_data)
             self.update_struct_data(audio_name, params, indent=2)
 
         self._save_json_data()
@@ -139,6 +133,7 @@ class DataManager:
 
         # Save the updated data
         self.save_json(struct_data, self.struct_path, name, indent)
+        return struct_data
 
     def save_json(self,
         results: Union[dict, List[dict]],

@@ -1362,14 +1362,12 @@ class ShowStructurer:
         qlc_scripts = []  # QLC+ scripts
         function_names = [] # list that holds names of beforementioned scripts
         show = self.create_show(name) # holds information about song
-        sections = show.struct["chorus_sections"] # energetic segments of the song
         segments = show.struct["segments"] # segments of the song
 
         # choose primary chasers and colours - select JUST ONE primary chaser for the whole song
         strong_chasers = ["FastPulse", "SideToSide", "ColorPulse"]
         idle_chasers = ["SimpleColor"]
         primary_chaser = random.choice(strong_chasers)  # Select ONE primary chaser for all energetic segments
-        secondary_chaser = random.choice(idle_chasers)
         
         # Choose colors with same logic as before
         colours = ["red", "green", "blue", "pink", "yellow", "cyan", "orange", "purple"]
@@ -1454,37 +1452,31 @@ class ShowStructurer:
             end_time = segments[i]["end"]*1000
             length = (segments[i]["end"] - segments[i]["start"])*1000
             queues = []
-            found = False
-
-            for section in sections:
-                if segments[i]["start"] == section["seg_start"]:
-                    found = True
-                    
-                    # Use the single primary chaser for all energetic segments
-                    current_chaser = primary_chaser
-                    is_focus_segment = segments[i]["label"] == show.struct["focus"]["first"]
-                    
-                    # Override chaser selection for focus segments if needed
-                    if not onefocus and is_focus_segment and current_chaser == "ColorPulse":
-                        # If it's a focus segment and onefocus is False, don't use ColorPulse
-                        current_chaser = random.choice(["FastPulse", "SideToSide"])
-                    
-                    # Apply the selected chaser
-                    if current_chaser == "ColorPulse" or simple == True: # simple mode uses only ColorPulse chaser
-                        queues.append(self.color_pulse(
-                            name, show, color1=primary_color1, color2=primary_color2, dimmer=255,
-                            length=length, start=start_time, queuename=f"colorpulse{i}"))
-                    elif current_chaser == "FastPulse":
-                        queues.append(self.fastpulse(
-                            name, show, color1=[primary_color1, primary_color2],
-                            length=length, start=start_time, queuename=f"fastpulse{i}"))
-                    elif current_chaser == "SideToSide":
-                        queues.append(self.side_to_side(
-                            name, show, color1=primary_color1, color2=primary_color2,
-                            length=length, start=start_time, queuename=f"sidetoside{i}"))
-                    break
-
-            if not found:
+            if segments[i]["is_chorus_section"]:
+                found = True
+                # Use the single primary chaser for all energetic segments
+                current_chaser = primary_chaser
+                is_focus_segment = segments[i]["label"] == show.struct["focus"]["first"]
+                
+                # Override chaser selection for focus segments if needed
+                if not onefocus and is_focus_segment and current_chaser == "ColorPulse":
+                    # If it's a focus segment and onefocus is False, don't use ColorPulse
+                    current_chaser = random.choice(["FastPulse", "SideToSide"])
+                
+                # Apply the selected chaser
+                if current_chaser == "ColorPulse" or simple == True: # simple mode uses only ColorPulse chaser
+                    queues.append(self.color_pulse(
+                        name, show, color1=primary_color1, color2=primary_color2, dimmer=255,
+                        length=length, start=start_time, queuename=f"colorpulse{i}"))
+                elif current_chaser == "FastPulse":
+                    queues.append(self.fastpulse(
+                        name, show, color1=[primary_color1, primary_color2],
+                        length=length, start=start_time, queuename=f"fastpulse{i}"))
+                elif current_chaser == "SideToSide":
+                    queues.append(self.side_to_side(
+                        name, show, color1=primary_color1, color2=primary_color2,
+                        length=length, start=start_time, queuename=f"sidetoside{i}"))
+            else:
                 queues.append(self.simple_color(
                     name, show, color=idle_colour, dimmer=255, length=length, 
                     start=start_time, queuename=f"color{i}"))
