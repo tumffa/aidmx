@@ -63,8 +63,8 @@ class QueueManager:
         frame_delays_ms, dmx_frames = scripts_dict["ola"]["frame_delays_ms"], scripts_dict["ola"]["dmx_frames"]
         self.dm.save_ola_sequence(audio_name, frame_delays_ms, dmx_frames)
 
-    def play_ola_show(self, audio_name, delay, universe):
-        print(f"--Playing OLA show for {audio_name} with delay {delay} sec on universe {universe}")
+    def play_ola_show(self, audio_name, delay, universe, start_at_sec=0.0):
+        print(f"--Playing OLA show for {audio_name} with delay {delay} sec on universe {universe}, start_at={start_at_sec:.2f}s")
 
         struct_data = self.dm.get_struct_data(audio_name)
         song_path = struct_data.get("filepath")
@@ -75,13 +75,22 @@ class QueueManager:
         frame_delays_ms, dmx_frames = self.dm.load_ola_sequence(audio_name)
         print(f"--Loaded OLA sequence from {song_path}")
 
-        self.song_playback_and_ola(song_path, frame_delays_ms, dmx_frames, delay=delay, universe=universe)
+        self.song_playback_and_ola(song_path, frame_delays_ms, dmx_frames, delay=delay, universe=universe, start_at_sec=start_at_sec)
 
-    def song_playback_and_ola(self, song_path, frame_delays_ms, dmx_frames, delay, universe):
-        print(f"--Starting playback of {song_path}")
+    def song_playback_and_ola(self, song_path, frame_delays_ms, dmx_frames, delay, universe, start_at_sec=0.0):
+        print(f"--Starting playback of {song_path} (seek to {start_at_sec:.2f}s)")
         pygame.mixer.init()
         pygame.mixer.music.load(song_path)
-        pygame.mixer.music.play()
+        # Try to start at the requested timestamp
+        try:
+            pygame.mixer.music.play(start=max(0.0, float(start_at_sec)))
+        except Exception:
+            pygame.mixer.music.play()
+            try:
+                pygame.mixer.music.set_pos(max(0.0, float(start_at_sec)))
+            except Exception:
+                # Fallback: start from 0 if seeking not supported
+                pass
 
         # Wait until audio is actually playing
         while not pygame.mixer.music.get_busy():
@@ -89,8 +98,33 @@ class QueueManager:
 
         time.sleep(delay)
 
-        print(f"--Starting DMX sequence playback with OLA")
-        dmx_thread = threading.Thread(target=play_dmx_sequence, args=(frame_delays_ms, dmx_frames, universe))
+        # Slice DMX sequence to start at the same timestamp
+        start_ms = max(0, int(start_at_sec * 1000))
+        if frame_delays_ms and dmx_frames:
+            cum = 0
+            idx = None
+            for i, d in enumerate(frame_delays_ms):
+                cum += int(d)
+                if cum >= start_ms:
+                    idx = i
+                    break
+            if idx is None:
+                print("--Start timestamp beyond DMX sequence length; nothing to play")
+                pygame.mixer.music.stop()
+                return
+
+            ms_before = cum - int(frame_delays_ms[idx])
+            overshoot = start_ms - ms_before
+            first_delay = max(0, int(frame_delays_ms[idx]) - overshoot)
+
+            sliced_delays = [first_delay] + list(frame_delays_ms[idx+1:])
+            sliced_frames = list(dmx_frames[idx:])
+        else:
+            sliced_delays = frame_delays_ms
+            sliced_frames = dmx_frames
+
+        print(f"--Starting DMX sequence playback with OLA from {start_at_sec:.2f}s ({len(sliced_frames)} frames)")
+        dmx_thread = threading.Thread(target=play_dmx_sequence, args=(sliced_delays, sliced_frames, universe))
         dmx_thread.start()
         dmx_thread.join()
         pygame.mixer.music.stop()

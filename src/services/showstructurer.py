@@ -1362,14 +1362,12 @@ class ShowStructurer:
         qlc_scripts = []  # QLC+ scripts
         function_names = [] # list that holds names of beforementioned scripts
         show = self.create_show(name) # holds information about song
-        sections = show.struct["chorus_sections"] # energetic segments of the song
         segments = show.struct["segments"] # segments of the song
 
         # choose primary chasers and colours - select JUST ONE primary chaser for the whole song
         strong_chasers = ["FastPulse", "SideToSide", "ColorPulse"]
         idle_chasers = ["SimpleColor"]
         primary_chaser = random.choice(strong_chasers)  # Select ONE primary chaser for all energetic segments
-        secondary_chaser = random.choice(idle_chasers)
         
         # Choose colors with same logic as before
         colours = ["red", "green", "blue", "pink", "yellow", "cyan", "orange", "purple"]

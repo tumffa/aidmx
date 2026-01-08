@@ -325,39 +325,36 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
         ss = float(first_s) / fps
         se = float(first_e) / fps
 
-        # Only apply if the segment overlaps the first silent range
         mask_first = (times_abs >= ss) & (times_abs <= se)
         if mask_first.any():
-            # Find first sample strictly after the range
             post_candidates = np.where(times_abs > se)[0]
             if post_candidates.size > 0:
                 post_idx = int(post_candidates[0])
-                v_post = float(values[post_idx])  # use raw envelope (pre-pauses), as requested
+                v_post = float(values[post_idx])  # use raw envelope (pre-pauses)
                 if v_post < 0.5:
-                    # Ease-in from 0 to v_post across the range
                     prog = (times_abs[mask_first] - ss) / max(se - ss, 1e-12)  # 0..1
                     eased = np.sin(0.5 * np.pi * prog)  # 0 -> 1 smoothly
                     refined_values[mask_first] = v_post * eased
-                # If v_post >= 0.5: do nothing (keep current refined values)
+                # If v_post >= 0.5: do nothing
 
-        # Last silent range: fade away to 0 by 50% of the range
+        # Last silent range: fade away to 0 BEFORE the 50% mark
         last_s, last_e = sranges[-1]
         ss2 = float(last_s) / fps
         se2 = float(last_e) / fps
         if se2 > ss2:
-            half = ss2 + 0.5 * (se2 - ss2)
-            # First half: ease down to 0
-            mask_first_half = (times_abs >= ss2) & (times_abs <= half)
-            if mask_first_half.any():
-                prog = (times_abs[mask_first_half] - ss2) / max(half - ss2, 1e-12)  # 0..1
+            ramp_ratio = 0.45  # reach zero before 50% of the range
+            ramp_end = ss2 + ramp_ratio * (se2 - ss2)
+            # Ease down to 0 up to ramp_end
+            mask_ramp = (times_abs >= ss2) & (times_abs <= ramp_end)
+            if mask_ramp.any():
+                prog = (times_abs[mask_ramp] - ss2) / max(ramp_end - ss2, 1e-12)
                 eased_down = np.cos(0.5 * np.pi * prog)  # 1 -> 0 smoothly
-                refined_values[mask_first_half] = refined_values[mask_first_half] * eased_down
-            # Second half: clamp to 0
-            mask_second_half = (times_abs > half) & (times_abs <= se2)
-            if mask_second_half.any():
-                refined_values[mask_second_half] = 0.0
+                refined_values[mask_ramp] = refined_values[mask_ramp] * eased_down
+            # After ramp_end within the range: clamp to 0
+            mask_after = (times_abs > ramp_end) & (times_abs <= se2)
+            if mask_after.any():
+                refined_values[mask_after] = 0.0
 
-    # Return envelope with refined values; keep times unchanged (still relative)
     return {
         "times": envelope["times"],
         "values": refined_values.tolist(),

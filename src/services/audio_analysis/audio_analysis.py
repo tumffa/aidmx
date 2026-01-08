@@ -6,11 +6,32 @@ from src.services.audio_analysis.light_strength_envelope import calculate_light_
 
 def analyze_audio(song_data, struct_data):
     params = []
-    params += initialize_song_metrics(song_data, struct_data=struct_data)
-    params += struct_stats(song_data, name=song_data.get("name"), struct_data=struct_data)
-    params += get_pauses(song_data.get("name"), struct_data)
-    params += segment(song_data.get("name"), struct_data=struct_data)
-    params += calculate_light_strength_envelope(song_data, struct_data=struct_data)
+    merged = dict(struct_data) if struct_data else {}
+
+    out = initialize_song_metrics(song_data, struct_data=merged)
+    params += out
+    for d in out:
+        merged.update(d)
+
+    out = struct_stats(song_data, name=song_data.get("name"), struct_data=merged)
+    params += out
+    for d in out:
+        merged.update(d)
+
+    out = get_pauses(s:=
+        song_data.get("name"), merged)
+    params += out
+    for d in out:
+        merged.update(d)
+
+    out = segment(song_data.get("name"), struct_data=merged)
+    params += out
+    for d in out:
+        merged.update(d)
+
+    out = calculate_light_strength_envelope(song_data, struct_data=merged)
+    params += out
+
     return params
 
 def initialize_song_metrics(song_data, struct_data):
@@ -51,7 +72,7 @@ def initialize_song_metrics(song_data, struct_data):
             "onset_parts": onset_parts
         }
     ]
-    print("------Audio metrics, strobe parts and dimmer scaling done")
+    print("------Audio metrics and strobe parts initialized")
 
     return params
 
