@@ -378,113 +378,184 @@ def get_modified_rms(song_data, name, rms=False, category=None, pauses=False, st
 
     return modified_rms
 
-def get_pauses(name, struct_data):
+def get_pauses(
+    name,
+    struct_data,
+    alpha=0.2,                 # threshold factor vs segment-average (also used for song-level total RMS)
+    active_frac_min=0.25,      # min fraction of frames above threshold to call an instrument "active"
+    run_min_floor_sec=0.5,     # min duration for a quiet run to be eligible
+    run_prominence_std=0.5,    # how many std above the mean run length counts as "clearly above"
+):
     drum_rms = np.asarray(struct_data["drums_rms"], dtype=np.float64)
     bass_rms = np.asarray(struct_data["bass_rms"], dtype=np.float64)
     other_rms = np.asarray(struct_data["other_rms"], dtype=np.float64)
     vocals_rms = np.asarray(struct_data["vocals_rms"], dtype=np.float64)
-    rms = np.asarray(struct_data["rms"], dtype=np.float64)
+    total_rms = np.asarray(struct_data["rms"], dtype=np.float64)  # song-level RMS
 
-    drums_avg = float(struct_data["drums_average"])
-    bass_avg = float(struct_data["bass_average"])
-    other_avg = float(struct_data["other_average"])
-    vocals_avg = float(struct_data["vocals_average"])
-    average_volume = float(struct_data["total_rms"])
-
-    quiet_threshold_drums = 0.2 * drums_avg
-    quiet_threshold_bass = 0.2 * bass_avg
-    quiet_threshold_other = 0.2 * other_avg
-    quiet_threshold_vocals = 0.2 * vocals_avg
-    quiet_threshold_rms = 0.2 * average_volume
-
-    L = min(len(drum_rms), len(bass_rms), len(other_rms), len(vocals_rms), len(rms))
+    L = min(len(drum_rms), len(bass_rms), len(other_rms), len(vocals_rms))
     if L == 0:
-        return [{"pauses": [], "silent_ranges": []}]
+        return [{"pauses": []}]
 
-    drum_quiet = (drum_rms[:L] < quiet_threshold_drums)
-    bass_quiet = (bass_rms[:L] < quiet_threshold_bass)
-    other_quiet = (other_rms[:L] < quiet_threshold_other)
-    vocals_quiet = (vocals_rms[:L] < quiet_threshold_vocals)
-    rms_quiet = (rms[:L] < quiet_threshold_rms)
-
-    combined_quiet = (
-        drum_quiet.astype(np.int32)
-        + bass_quiet.astype(np.int32)
-        + other_quiet.astype(np.int32)
-        + vocals_quiet.astype(np.int32)
-        + rms_quiet.astype(np.int32)
-    )
-
-    # Relax requirement only BEFORE chorus segments
     fps = int(struct_data.get("fps", 43))
-    proximity_frames = int(round(1.5 * fps))
-    segments = struct_data.get("segments", [])
-    chorus_starts = [int(seg["start"] * fps) for seg in segments if seg.get("is_chorus_section")]
-    near_boundary = np.zeros(L, dtype=bool)
-    for s in chorus_starts:
-        left = max(0, s - proximity_frames)
-        right = min(L, s + 1)  # up to the start frame, not after
-        near_boundary[left:right] = True
+    segments = struct_data.get("segments", []) or []
 
-    required_quiet = np.full(L, 3, dtype=np.int32)
-    required_quiet[near_boundary] = 2
+    def seg_idx(seg):
+        s = max(0, int(round(seg["start"] * fps)))
+        e = min(L, int(round(seg["end"] * fps)))
+        return s, e
 
-    window_size = 22
-    min_quiet_frames = 20
+    def quiet_runs(mask, base_idx=0):
+        # Returns [(start_abs, end_abs, length_frames), ...]
+        if mask.size == 0:
+            return []
+        padded = np.pad(mask.astype(np.int8), (1, 1), mode='constant', constant_values=0)
+        diffs = np.diff(padded)
+        starts = np.where(diffs == 1)[0]
+        ends = np.where(diffs == -1)[0]
+        out = []
+        for s, e in zip(starts, ends):
+            if e > s:
+                out.append((base_idx + int(s), base_idx + int(e), int(e - s)))
+        return out
 
-    quiet_mask = (combined_quiet >= required_quiet)
+    def choose_long_quiet(runs, fps_local, min_floor_sec, prominence_std):
+        # Accept runs clearly above average window time within this segment (or whole song for total_rms)
+        if not runs:
+            return []
+        durs = np.array([r[2] for r in runs], dtype=np.float64)
+        mean = float(np.mean(durs))
+        std = float(np.std(durs))
+        min_floor = int(round(min_floor_sec * fps_local))
+        if len(durs) == 1:
+            thr = max(min_floor, int(round(0.5 * durs[0])))
+        else:
+            thr = max(int(round(mean + prominence_std * std)), min_floor)
+        return [(s, e) for (s, e, d) in runs if d >= thr]
 
-    counts = np.convolve(quiet_mask.astype(np.int32), np.ones(window_size, dtype=np.int32), mode='valid')
-    window_ok = (counts >= min_quiet_frames).astype(np.int8)
+    pauses = []
 
-    coverage = np.zeros(L, dtype=bool)
-    for i, ok in enumerate(window_ok):
-        if ok:
-            coverage[i:i + window_size] = True
-    coverage &= quiet_mask
-
-    padded = np.pad(coverage.astype(np.int8), (1, 1), mode='constant', constant_values=0)
-    diffs = np.diff(padded)
-    starts = np.where(diffs == 1)[0]
-    ends = np.where(diffs == -1)[0]
-
-    def below(mean_val, thr):
-        return bool(mean_val < thr)
-
-    quiet_ranges = []
-    for s, e in zip(starts, ends):
-        s_i, e_i = int(s), int(e)
-        if e_i <= s_i:
+    # Segment-wise processing
+    for seg_idx_i, seg in enumerate(segments):
+        s_idx, e_idx = seg_idx(seg)
+        if e_idx - s_idx <= 0:
             continue
-        info = {
-            "drums": below(float(np.mean(drum_rms[s_i:e_i])), quiet_threshold_drums),
-            "bass": below(float(np.mean(bass_rms[s_i:e_i])), quiet_threshold_bass),
-            "other": below(float(np.mean(other_rms[s_i:e_i])), quiet_threshold_other),
-            "vocals": below(float(np.mean(vocals_rms[s_i:e_i])), quiet_threshold_vocals),
-            "mix": below(float(np.mean(rms[s_i:e_i])), quiet_threshold_rms),
-        }
-        quiet_ranges.append((s_i, e_i, info))
 
-    # Pauses near segment boundaries: both before and after start (unchanged)
-    silent_pre_or_post_segments = []
-    seg_starts_all = [int(seg["start"] * fps) for seg in segments]
-    boundary_slack = proximity_frames
-    for s_i, e_i, info in quiet_ranges:
-        for s_frame in seg_starts_all:
-            if abs(s_frame - e_i) < boundary_slack or abs(s_frame - s_i) < boundary_slack:
-                tup = (int(s_i), int(e_i), info)
-                if tup not in silent_pre_or_post_segments:
-                    silent_pre_or_post_segments.append(tup)
-                break
+        # Segment averages and thresholds
+        d_avg = float(np.mean(drum_rms[s_idx:e_idx])) or 1e-12
+        b_avg = float(np.mean(bass_rms[s_idx:e_idx])) or 1e-12
+        o_avg = float(np.mean(other_rms[s_idx:e_idx])) or 1e-12
+        v_avg = float(np.mean(vocals_rms[s_idx:e_idx])) or 1e-12
 
-    params = [{"pauses": silent_pre_or_post_segments, "silent_ranges": quiet_ranges}]
-    for pause in silent_pre_or_post_segments:
-        print(f"----Pause near segment boundary {pause[0]/fps:.2f}s to {pause[1]/fps:.2f}s, below: "
-              f"{[k for k,v in pause[2].items() if v]}")
-    for silent in quiet_ranges:
-        print(f"----Silent range {silent[0]/fps:.2f}s to {silent[1]/fps:.2f}s, below: "
-              f"{[k for k,v in silent[2].items() if v]}")
-    return params
+        thr_d = alpha * d_avg
+        thr_b = alpha * b_avg
+        thr_o = alpha * o_avg
+        thr_v = alpha * v_avg
+
+        # Quiet masks within segment
+        mask_d = (drum_rms[s_idx:e_idx] < thr_d)
+        mask_b = (bass_rms[s_idx:e_idx] < thr_b)
+        mask_o = (other_rms[s_idx:e_idx] < thr_o)
+        mask_v = (vocals_rms[s_idx:e_idx] < thr_v)
+
+        # Active in this segment?
+        d_active = float(np.mean(~mask_d)) >= active_frac_min
+        b_active = float(np.mean(~mask_b)) >= active_frac_min
+        o_active = float(np.mean(~mask_o)) >= active_frac_min
+        v_active = float(np.mean(~mask_v)) >= active_frac_min
+
+        # Quiet runs and "clearly above average" selection
+        runs_d = quiet_runs(mask_d, base_idx=s_idx)
+        runs_b = quiet_runs(mask_b, base_idx=s_idx)
+        runs_o = quiet_runs(mask_o, base_idx=s_idx)
+        runs_v = quiet_runs(mask_v, base_idx=s_idx)
+
+        long_d = choose_long_quiet(runs_d, fps, run_min_floor_sec, run_prominence_std)
+        long_b = choose_long_quiet(runs_b, fps, run_min_floor_sec, run_prominence_std)
+        long_o = choose_long_quiet(runs_o, fps, run_min_floor_sec, run_prominence_std)
+        long_v = choose_long_quiet(runs_v, fps, run_min_floor_sec, run_prominence_std)
+
+        # Ruling:
+        # 1) If drums are active and there is a pause in drums, it is a pause.
+        if d_active and long_d:
+            for (ps, pe) in long_d:
+                info = {"drums": True, "bass": False, "other": False, "vocals": False, "segment_index": seg_idx_i, "scale_ok": True}
+                pauses.append((int(ps), int(pe), info))
+            continue
+
+        # 2) If drums are NOT active, but vocals/bass/other are:
+        #    - If both bass and other are active, they both need to be paused (no overlap check). If both have any long quiet run,
+        #      include all of their long quiet windows as pauses.
+        #    - If there is only one instrument active among vocals/bass/other, that instrument alone being paused is enough.
+        if not d_active:
+            if b_active and o_active:
+                if long_b and long_o:
+                    for (ps, pe) in long_b:
+                        info = {"drums": False, "bass": True, "other": False, "vocals": False, "segment_index": seg_idx_i, "scale_ok": True}
+                        pauses.append((int(ps), int(pe), info))
+                    for (ps, pe) in long_o:
+                        info = {"drums": False, "bass": False, "other": True, "vocals": False, "segment_index": seg_idx_i, "scale_ok": True}
+                        pauses.append((int(ps), int(pe), info))
+            else:
+                active_list = [("bass", b_active, long_b), ("other", o_active, long_o), ("vocals", v_active, long_v)]
+                only_one_active = [name for name, act, _ in active_list if act]
+                if len(only_one_active) == 1:
+                    name = only_one_active[0]
+                    longs = dict(bass=long_b, other=long_o, vocals=long_v)[name]
+                    for (ps, pe) in longs:
+                        info = {
+                            "drums": False,
+                            "bass": (name == "bass"),
+                            "other": (name == "other"),
+                            "vocals": (name == "vocals"),
+                            "segment_index": seg_idx_i,
+                            "scale_ok": True,
+                        }
+                        pauses.append((int(ps), int(pe), info))
+
+    # Song-level total RMS quiet windows: rms < alpha * average(total_rms) across the whole song
+    if total_rms.size:
+        song_avg = float(np.mean(total_rms)) or 1e-12
+        thr_total = alpha * song_avg
+        mask_total = (total_rms < thr_total)
+        runs_total = quiet_runs(mask_total, base_idx=0)
+        long_total = choose_long_quiet(runs_total, fps, run_min_floor_sec, run_prominence_std)
+        for (ps, pe) in long_total:
+            info = {
+                "drums": False,
+                "bass": False,
+                "other": False,
+                "vocals": False,
+                "mix": True,
+                "segment_index": -1,  # song-level
+                "scale_ok": True,
+            }
+            pauses.append((int(ps), int(pe), info))
+
+    # Merge overlapping/adjacent pauses (within 0.15s)
+    merged_pauses = []
+    merge_gap_frames = int(round(0.15 * fps))
+    for (s, e, info) in sorted(pauses, key=lambda x: (x[0], x[1])):
+        if not merged_pauses:
+            merged_pauses.append([s, e, info])
+            continue
+        ps, pe, pinfo = merged_pauses[-1]
+        if s <= pe + merge_gap_frames:
+            merged_pauses[-1][1] = max(pe, e)
+            merged_pauses[-1][2] = {
+                "drums": bool(pinfo.get("drums") or info.get("drums")),
+                "bass": bool(pinfo.get("bass") or info.get("bass")),
+                "other": bool(pinfo.get("other") or info.get("other")),
+                "vocals": bool(pinfo.get("vocals") or info.get("vocals")),
+                "segment_index": pinfo.get("segment_index", info.get("segment_index")),
+                "scale_ok": bool(pinfo.get("scale_ok", False) or info.get("scale_ok", False)),
+            }
+        else:
+            merged_pauses.append([s, e, info])
+
+    pauses_out = [(int(s), int(e), info) for (s, e, info) in merged_pauses]
+    for pause in pauses_out:
+        print(f"Pause {pause[0]/fps:.2f}s to {pause[1]/fps:.2f}s - drums:{pause[2].get('drums')} bass:{pause[2].get('bass')} other:{pause[2].get('other')} vocals:{pause[2].get('vocals')} segment_index:{pause[2].get('segment_index')} scale_ok:{pause[2].get('scale_ok')}")
+    return [{"pauses": pauses_out}]
 
 def get_pauses_for_segment(rms, threshold):
     rms = np.asarray(rms, dtype=np.float64)

@@ -1,7 +1,6 @@
 import os
 import threading
 import time
-import pygame
 from src.services.showstructurer import ShowStructurer
 from src.services.audio_analysis import audio_analysis
 from src.services.ola_dmx_controller import play_dmx_sequence
@@ -78,6 +77,7 @@ class QueueManager:
         self.song_playback_and_ola(song_path, frame_delays_ms, dmx_frames, delay=delay, universe=universe, start_at_sec=start_at_sec)
 
     def song_playback_and_ola(self, song_path, frame_delays_ms, dmx_frames, delay, universe, start_at_sec=0.0):
+        import pygame
         print(f"--Starting playback of {song_path} (seek to {start_at_sec:.2f}s)")
         pygame.mixer.init()
         pygame.mixer.music.load(song_path)

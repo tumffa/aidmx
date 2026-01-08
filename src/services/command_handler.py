@@ -117,7 +117,7 @@ class CommandHandler:
                 return
 
             if ola_delay is None or ola_delay < 0:
-                ola_delay = 0.09
+                ola_delay = 0.04
             if qlc_delay is None or qlc_delay < 0:
                 qlc_delay = 1.0
             if qlc_lag is None or qlc_lag <= 0:
