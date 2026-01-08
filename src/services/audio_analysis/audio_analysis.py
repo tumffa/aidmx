@@ -367,13 +367,15 @@ def get_modified_rms(song_data, name, rms=False, category=None, pauses=False, st
     if isinstance(pauses, list):
         pause_ranges = pauses
     else:
-        pause_ranges, _ = get_pauses(name, struct_data)
+        # Expect caller to pass pauses via struct_data; fallback to none
+        pause_ranges = []
 
     modified_rms = rms.copy()
-    # Zero-out ranges via slicing
-    for start, end in pause_ranges:
+    # Zero-out ranges via slicing; accept (start,end) or (start,end,info)
+    for rng in pause_ranges:
+        start = int(rng[0]); end = int(rng[1])
         modified_rms[start:end] = 0.0
-    
+
     return modified_rms
 
 def get_pauses(name, struct_data):
@@ -383,15 +385,21 @@ def get_pauses(name, struct_data):
     vocals_rms = np.asarray(struct_data["vocals_rms"], dtype=np.float64)
     rms = np.asarray(struct_data["rms"], dtype=np.float64)
 
-    average_volume = struct_data["total_rms"]
-    quiet_threshold_drums = 0.2 * struct_data["drums_average"]
-    quiet_threshold_bass = 0.2 * struct_data["bass_average"]
-    quiet_threshold_other = 0.2 * struct_data["other_average"]
-    quiet_threshold_vocals = 0.2 * struct_data["vocals_average"]
+    drums_avg = float(struct_data["drums_average"])
+    bass_avg = float(struct_data["bass_average"])
+    other_avg = float(struct_data["other_average"])
+    vocals_avg = float(struct_data["vocals_average"])
+    average_volume = float(struct_data["total_rms"])
+
+    quiet_threshold_drums = 0.2 * drums_avg
+    quiet_threshold_bass = 0.2 * bass_avg
+    quiet_threshold_other = 0.2 * other_avg
+    quiet_threshold_vocals = 0.2 * vocals_avg
     quiet_threshold_rms = 0.2 * average_volume
 
-    # Align lengths safely
     L = min(len(drum_rms), len(bass_rms), len(other_rms), len(vocals_rms), len(rms))
+    if L == 0:
+        return [{"pauses": [], "silent_ranges": []}]
 
     drum_quiet = (drum_rms[:L] < quiet_threshold_drums)
     bass_quiet = (bass_rms[:L] < quiet_threshold_bass)
@@ -399,36 +407,77 @@ def get_pauses(name, struct_data):
     vocals_quiet = (vocals_rms[:L] < quiet_threshold_vocals)
     rms_quiet = (rms[:L] < quiet_threshold_rms)
 
-    combined_quiet = drum_quiet.astype(np.int32) + bass_quiet.astype(np.int32) + other_quiet.astype(np.int32) + vocals_quiet.astype(np.int32) + rms_quiet.astype(np.int32)
+    combined_quiet = (
+        drum_quiet.astype(np.int32)
+        + bass_quiet.astype(np.int32)
+        + other_quiet.astype(np.int32)
+        + vocals_quiet.astype(np.int32)
+        + rms_quiet.astype(np.int32)
+    )
+
+    # Relax requirement only BEFORE chorus segments
+    fps = int(struct_data.get("fps", 43))
+    proximity_frames = int(round(1.5 * fps))
+    segments = struct_data.get("segments", [])
+    chorus_starts = [int(seg["start"] * fps) for seg in segments if seg.get("is_chorus_section")]
+    near_boundary = np.zeros(L, dtype=bool)
+    for s in chorus_starts:
+        left = max(0, s - proximity_frames)
+        right = min(L, s + 1)  # up to the start frame, not after
+        near_boundary[left:right] = True
+
+    required_quiet = np.full(L, 3, dtype=np.int32)
+    required_quiet[near_boundary] = 2
 
     window_size = 22
     min_quiet_frames = 20
 
-    # Window counts where at least 3 tracks are quiet
-    quiet_mask = (combined_quiet >= 3).astype(np.int32)
-    counts = np.convolve(quiet_mask, np.ones(window_size, dtype=np.int32), mode='valid')
+    quiet_mask = (combined_quiet >= required_quiet)
+    counts = np.convolve(quiet_mask.astype(np.int32), np.ones(window_size, dtype=np.int32), mode='valid')
     window_ok = (counts >= min_quiet_frames).astype(np.int32)
-
-    # Expand window flags to full-length coverage
     coverage = np.convolve(window_ok, np.ones(window_size, dtype=np.int32), mode='full')[:L] > 0
 
-    # Extract ranges
     padded = np.pad(coverage.astype(np.int8), (1, 1), mode='constant', constant_values=0)
     diffs = np.diff(padded)
     starts = np.where(diffs == 1)[0]
     ends = np.where(diffs == -1)[0]
-    # Cast to Python ints for JSON safety
-    quiet_ranges = [(int(s), int(e)) for s, e in zip(starts, ends)]
 
-    silent_pre_segments = []
-    fps = 43
-    for section in quiet_ranges:
-        for segment in struct_data["segments"]:
-            if abs(int(segment["start"] * fps) - section[1]) < 100:
-                silent_pre_segments.append((int(section[0]), int(section[1])))
+    def below(mean_val, thr):
+        return bool(mean_val < thr)
+
+    quiet_ranges = []
+    for s, e in zip(starts, ends):
+        s_i, e_i = int(s), int(e)
+        if e_i <= s_i:
+            continue
+        info = {
+            "drums": below(float(np.mean(drum_rms[s_i:e_i])), quiet_threshold_drums),
+            "bass": below(float(np.mean(bass_rms[s_i:e_i])), quiet_threshold_bass),
+            "other": below(float(np.mean(other_rms[s_i:e_i])), quiet_threshold_other),
+            "vocals": below(float(np.mean(vocals_rms[s_i:e_i])), quiet_threshold_vocals),
+            "mix": below(float(np.mean(rms[s_i:e_i])), quiet_threshold_rms),
+        }
+        quiet_ranges.append((s_i, e_i, info))
+
+    # Pauses near segment boundaries: both before and after start (unchanged)
+    silent_pre_or_post_segments = []
+    seg_starts_all = [int(seg["start"] * fps) for seg in segments]
+    boundary_slack = proximity_frames
+    for s_i, e_i, info in quiet_ranges:
+        for s_frame in seg_starts_all:
+            if abs(s_frame - e_i) < boundary_slack or abs(s_frame - s_i) < boundary_slack:
+                tup = (int(s_i), int(e_i), info)
+                if tup not in silent_pre_or_post_segments:
+                    silent_pre_or_post_segments.append(tup)
                 break
 
-    params = [{"pauses": silent_pre_segments, "silent_ranges": quiet_ranges}]
+    params = [{"pauses": silent_pre_or_post_segments, "silent_ranges": quiet_ranges}]
+    for pause in silent_pre_or_post_segments:
+        print(f"----Pause near segment boundary {pause[0]/fps:.2f}s to {pause[1]/fps:.2f}s, below: "
+              f"{[k for k,v in pause[2].items() if v]}")
+    for silent in quiet_ranges:
+        print(f"----Silent range {silent[0]/fps:.2f}s to {silent[1]/fps:.2f}s, below: "
+              f"{[k for k,v in silent[2].items() if v]}")
     return params
 
 def get_pauses_for_segment(rms, threshold):
@@ -450,6 +499,6 @@ def get_pauses_for_segment(rms, threshold):
     diffs = np.diff(padded)
     starts = np.where(diffs == 1)[0]
     ends = np.where(diffs == -1)[0]
-    # Cast to Python ints for JSON safety
+    # Cast to Python ints for JSON
     quiet_ranges = [(int(s), int(e)) for s, e in zip(starts, ends)]
     return quiet_ranges

@@ -63,7 +63,7 @@ def calculate_drums_envelope(segment,
         if "beat_defining_hits" in drum_analysis["kick"]:
             kick_hits = drum_analysis["kick"]["beat_defining_hits"]
         if "hit_times_with_strength" in drum_analysis["kick"]:
-            kick_original_hits = drum_analysis["kick"]["hit_times_with_strength"]
+            kick_original_hits = drum_analysis["kick"]["hit_times_with_strength"] 
     
     snare_hits = []
     snare_original_hits = []
@@ -290,13 +290,27 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
     times_abs = seg_start + times_rel
     scale = np.ones_like(times_abs, dtype=np.float64)
 
-    # 1) Apply pauses: ramp to 0 in first 33%, then hold 0 through the pause
-    for start_f, end_f in (pauses or []):
+    # Handle pauses as (start,end) or (start,end,info)
+    boundary_secs = 1.5
+    seg_start_abs = float(segment.get("start", 0.0))
+    seg_end_abs = float(segment.get("end", seg_start_abs))
+    for p in (pauses or []):
+        start_f, end_f = int(p[0]), int(p[1])
         ps = float(start_f) / fps
         pe = float(end_f) / fps
         if pe <= ps:
             continue
-        ramp_end = ps + (pe - ps) * 0.33
+
+        # Consider both the end of this segment and the start (which is the next segment's boundary)
+        crosses_start = (ps <= seg_start_abs <= pe)
+        crosses_end = (ps <= seg_end_abs <= pe)
+        near_start = (pe >= seg_start_abs - boundary_secs) and (ps <= seg_start_abs + boundary_secs)
+        near_end = (pe >= seg_end_abs - boundary_secs) and (ps <= seg_end_abs + boundary_secs)
+
+        # If pause is around/straddling either boundary, use the same fast ramp anchored to [ps, pe]
+        is_boundary_sensitive = crosses_start or crosses_end or near_start or near_end
+        ramp_ratio = 0.15 if is_boundary_sensitive else 0.33
+        ramp_end = ps + (pe - ps) * ramp_ratio
 
         in_pause = (times_abs >= ps) & (times_abs <= pe)
         if not in_pause.any():
@@ -305,7 +319,8 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
         in_ramp = (times_abs >= ps) & (times_abs <= ramp_end)
         if in_ramp.any():
             prog = (times_abs[in_ramp] - ps) / max(ramp_end - ps, 1e-12)
-            cand = np.cos(0.5 * np.pi * prog)  # 1 -> 0 smoothly
+            # Boundary-sensitive: linear drop for quicker fall; else cosine ease
+            cand = (1.0 - prog) if is_boundary_sensitive else np.cos(0.5 * np.pi * prog)
             scale[in_ramp] = np.minimum(scale[in_ramp], cand)
 
         after_ramp = (times_abs > ramp_end) & (times_abs <= pe)
@@ -317,8 +332,10 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
 
     # 2) Handle silent_ranges special cases: first and last ranges
     if silent_ranges:
-        # Normalize to sorted list of (int,int)
-        sranges = sorted([(int(s), int(e)) for s, e in silent_ranges], key=lambda x: x[0])
+        sranges = sorted(
+            [(int(s[0]), int(s[1])) if isinstance(s, (list, tuple)) and len(s) > 2 else (int(s[0]), int(s[1])) for s in silent_ranges],
+            key=lambda x: x[0]
+        )
 
         # First silent range: fade into first envelope value after the range IF that value < 0.5
         first_s, first_e = sranges[0]
@@ -335,25 +352,34 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
                     prog = (times_abs[mask_first] - ss) / max(se - ss, 1e-12)  # 0..1
                     eased = np.sin(0.5 * np.pi * prog)  # 0 -> 1 smoothly
                     refined_values[mask_first] = v_post * eased
-                # If v_post >= 0.5: do nothing
 
-        # Last silent range: fade away to 0 BEFORE the 50% mark
+        # Last silent range: full fade to zero if it reaches song end; otherwise reach zero before 50%
         last_s, last_e = sranges[-1]
         ss2 = float(last_s) / fps
         se2 = float(last_e) / fps
+
+        is_end_of_song = (total_frames is not None) and (int(last_e) >= int(total_frames) - 1)
         if se2 > ss2:
-            ramp_ratio = 0.45  # reach zero before 50% of the range
-            ramp_end = ss2 + ramp_ratio * (se2 - ss2)
-            # Ease down to 0 up to ramp_end
-            mask_ramp = (times_abs >= ss2) & (times_abs <= ramp_end)
-            if mask_ramp.any():
-                prog = (times_abs[mask_ramp] - ss2) / max(ramp_end - ss2, 1e-12)
-                eased_down = np.cos(0.5 * np.pi * prog)  # 1 -> 0 smoothly
-                refined_values[mask_ramp] = refined_values[mask_ramp] * eased_down
-            # After ramp_end within the range: clamp to 0
-            mask_after = (times_abs > ramp_end) & (times_abs <= se2)
-            if mask_after.any():
-                refined_values[mask_after] = 0.0
+            if is_end_of_song:
+                mask_full = (times_abs >= ss2) & (times_abs <= se2)
+                if mask_full.any():
+                    prog = (times_abs[mask_full] - ss2) / max(se2 - ss2, 1e-12)
+                    eased_down = np.cos(0.5 * np.pi * prog)  # 1 -> 0 smoothly
+                    refined_values[mask_full] = refined_values[mask_full] * eased_down
+                mask_after = (times_abs > se2)
+                if mask_after.any():
+                    refined_values[mask_after] = 0.0
+            else:
+                ramp_ratio = 0.45
+                ramp_end = ss2 + ramp_ratio * (se2 - ss2)
+                mask_ramp = (times_abs >= ss2) & (times_abs <= ramp_end)
+                if mask_ramp.any():
+                    prog = (times_abs[mask_ramp] - ss2) / max(ramp_end - ss2, 1e-12)
+                    eased_down = np.cos(0.5 * np.pi * prog)
+                    refined_values[mask_ramp] = refined_values[mask_ramp] * eased_down
+                mask_after = (times_abs > ramp_end) & (times_abs <= se2)
+                if mask_after.any():
+                    refined_values[mask_after] = 0.0
 
     return {
         "times": envelope["times"],

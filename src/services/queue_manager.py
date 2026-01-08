@@ -123,7 +123,7 @@ class QueueManager:
             sliced_delays = frame_delays_ms
             sliced_frames = dmx_frames
 
-        print(f"--Starting DMX sequence playback with OLA from {start_at_sec:.2f}s ({len(sliced_frames)} frames)")
+        print(f"--Starting DMX sequence playback with OLA from {start_at_sec:.2f}s")
         dmx_thread = threading.Thread(target=play_dmx_sequence, args=(sliced_delays, sliced_frames, universe))
         dmx_thread.start()
         dmx_thread.join()
