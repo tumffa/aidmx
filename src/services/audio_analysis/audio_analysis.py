@@ -433,9 +433,15 @@ def get_pauses(name, struct_data):
     min_quiet_frames = 20
 
     quiet_mask = (combined_quiet >= required_quiet)
+
     counts = np.convolve(quiet_mask.astype(np.int32), np.ones(window_size, dtype=np.int32), mode='valid')
-    window_ok = (counts >= min_quiet_frames).astype(np.int32)
-    coverage = np.convolve(window_ok, np.ones(window_size, dtype=np.int32), mode='full')[:L] > 0
+    window_ok = (counts >= min_quiet_frames).astype(np.int8)
+
+    coverage = np.zeros(L, dtype=bool)
+    for i, ok in enumerate(window_ok):
+        if ok:
+            coverage[i:i + window_size] = True
+    coverage &= quiet_mask
 
     padded = np.pad(coverage.astype(np.int8), (1, 1), mode='constant', constant_values=0)
     diffs = np.diff(padded)
@@ -487,18 +493,20 @@ def get_pauses_for_segment(rms, threshold):
     window_size = 50
     min_quiet_frames = 40
 
-    # Counts of quiet frames per window
     counts = np.convolve(quiet.astype(np.int32), np.ones(window_size, dtype=np.int32), mode='valid')
-    window_ok = (counts >= min_quiet_frames).astype(np.int32)
+    window_ok = (counts >= min_quiet_frames).astype(np.int8)
 
-    # Expand window flags to full-length coverage
-    coverage = np.convolve(window_ok, np.ones(window_size, dtype=np.int32), mode='full')[:len(rms)] > 0
+    # Explicit coverage without overshoot, then clamp to quiet mask
+    coverage = np.zeros(len(rms), dtype=bool)
+    for i, ok in enumerate(window_ok):
+        if ok:
+            coverage[i:i + window_size] = True
+    coverage &= quiet
 
-    # Extract ranges
     padded = np.pad(coverage.astype(np.int8), (1, 1), mode='constant', constant_values=0)
     diffs = np.diff(padded)
     starts = np.where(diffs == 1)[0]
     ends = np.where(diffs == -1)[0]
-    # Cast to Python ints for JSON
+
     quiet_ranges = [(int(s), int(e)) for s, e in zip(starts, ends)]
     return quiet_ranges

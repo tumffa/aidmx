@@ -34,17 +34,19 @@ def calculate_light_strength_envelope(song_data, struct_data):
     return [{"segments": segments}]
 
 def calculate_drums_envelope(segment, 
-                                      resolution_ms=5, 
-                                      min_strength=0.01, 
-                                      snare_multi=1, 
-                                      max_snare_fadeout=1.5, 
-                                      kick_multi=0.5, 
-                                      max_kick_fadeout=0.8):
+                             resolution_ms=5, 
+                             min_strength=0.01, 
+                             snare_multi=1, 
+                             max_snare_fadeout=1.5, 
+                             min_snare_fadeout=0.25,
+                             kick_multi=0.5, 
+                             max_kick_fadeout=0.8,
+                             min_kick_fadeout=0.15):
     """
     Calculate a combined strength envelope from kick and snare beat-defining hits.
     Uses ONLY real hits (no phantom/grid markers) for more authentic light patterns.
-    - Snare hits reach 100% intensity with longer fadeouts (up to 1.5s)
-    - Kick hits reach 80% intensity with medium fadeouts (up to 0.8s)
+    - Snare hits reach 100% intensity with longer fadeouts (up to max_snare_fadeout), at least min_snare_fadeout when possible
+    - Kick hits reach 80% intensity with medium fadeouts (up to max_kick_fadeout), at least min_kick_fadeout when possible
     - All fadeouts complete to min_strength before next hit
     Times in the output are relative to segment start.
     """
@@ -106,128 +108,104 @@ def calculate_drums_envelope(segment,
                 if hit_time > time and hit_time < next_hit_time:
                     next_hit_time = hit_time
             
-            # Calculate fade-out time (min between time to next hit or max fadeout)
+            # Calculate fade-out time with min/max bounds, but never beyond next hit
             time_to_next = next_hit_time - time
-            # Ensure fadeout completes before the next hit
-            fadeout_time = min(time_to_next, max_snare_fadeout)
+            # ...existing code...
+            if time_to_next >= min_snare_fadeout:
+                fadeout_time = min(time_to_next, max_snare_fadeout)
+            else:
+                fadeout_time = time_to_next  # must complete before next hit if too close
             
             # Store snare with its fadeout time
             snare_fadeouts.append((time, strength, fadeout_time))
-    
-    # Only create fade-outs for actual kick hits (NEW)
+
+    # Only create fade-outs for actual kick hits
     for time, strength in kick_hits:
-        # Check if this is a real kick hit
         if any(abs(time - rt) < 0.05 for rt in real_kick_times):
-            # Find time to next defining hit (of any type)
             next_hit_time = segment_end
             for hit_time, _ in all_hits:
                 if hit_time > time and hit_time < next_hit_time:
                     next_hit_time = hit_time
-            
-            # Calculate fade-out time (min between time to next hit or max fadeout)
+
             time_to_next = next_hit_time - time
-            # Ensure fadeout completes before the next hit
-            fadeout_time = min(time_to_next, max_kick_fadeout)
+            # ...existing code...
+            if time_to_next >= min_kick_fadeout:
+                fadeout_time = min(time_to_next, max_kick_fadeout)
+            else:
+                fadeout_time = time_to_next
             
-            # Store kick with its fadeout time
             kick_fadeouts.append((time, strength, fadeout_time))
     
     # Generate envelope points
     resolution_sec = resolution_ms / 1000
     envelope_times = []
     envelope_values = []
-    
-    # Start with baseline at segment start
+
+    # Start at segment start; no pre-appended duplicate sample
     current_time = segment_start
-    envelope_times.append(current_time)
-    envelope_values.append(min_strength)
-    
+
     # Add points for each time step
     while current_time <= segment_end:
-        # Start with baseline value
+        # Baseline value
         current_value = min_strength
-        
-        # Process kick contribution - with EXTENDED FADEOUT
+
+        # Process kick contribution - directional immediate influence (post-hit only)
         kick_contribution = min_strength
-        
-        # Process immediate kick influence for smoother initial peak
+        window_kick = 0.1  # 100ms immediate influence window
         for kick_time, kick_strength in kick_hits:
             if any(abs(kick_time - rt) < 0.05 for rt in real_kick_times):
-                kick_time_diff = abs(kick_time - current_time)
-                window_kick = 0.1  # 100ms window for immediate kick influence
-                
-                if kick_time_diff <= window_kick:
-                    # Time falloff - closer hits have more influence
-                    time_weight = 1.0 - (kick_time_diff / window_kick)
-                    kick_value = kick_multi * time_weight  # Kick reaches 80% max
+                dt = current_time - kick_time
+                if 0.0 <= dt <= window_kick:
+                    time_weight = 1.0 - (dt / window_kick)
+                    kick_value = kick_multi * time_weight
                     kick_contribution = max(kick_contribution, kick_value)
-        
-        # Process extended kick fadeouts (NEW)
+
+        # Extended kick fadeouts (unchanged directional)
         for kick_time, kick_strength, fadeout_time in kick_fadeouts:
-            # Check if this time point is within the fadeout window
             if kick_time <= current_time <= (kick_time + fadeout_time):
-                # Calculate how far into the fadeout we are
-                fadeout_progress = (current_time - kick_time) / fadeout_time
-                
-                # Make sure we reach EXACTLY min_strength at the end
-                if fadeout_progress >= 0.99:  # Just before the end
+                fadeout_progress = (current_time - kick_time) / max(fadeout_time, 1e-12)
+                if fadeout_progress >= 0.99:
                     kick_value = min_strength
                 else:
-                    # Create a smoother decay curve
-                    decay_factor = 1.0 - fadeout_progress
-                    decay_factor = decay_factor ** 1.5  # Smoother curve
-                    
-                    # Calculate contribution with gradual falloff to min_strength
-                    initial_strength = kick_multi  # 80% max intensity for kicks
+                    decay_factor = (1.0 - fadeout_progress) ** 1.5
+                    initial_strength = kick_multi
                     kick_value = min_strength + (initial_strength - min_strength) * decay_factor
-                
                 kick_contribution = max(kick_contribution, kick_value)
-        
-        # Process snare influence with extended fade-out
+
+        # Process snare contribution - directional immediate influence (post-hit only)
         snare_contribution = min_strength
-        
-        # First check for immediate snare impact
-        window_snare_immediate = 0.1  # 100ms for immediate impact
-        
+        window_snare_immediate = 0.1
         for snare_time, snare_strength in snare_hits:
-            # Check if this is a real snare hit
             if any(abs(snare_time - rt) < 0.05 for rt in real_snare_times):
-                snare_time_diff = abs(snare_time - current_time)
-                
-                if snare_time_diff <= window_snare_immediate:
-                    # Time falloff for immediate impact
-                    time_weight = 1.0 - (snare_time_diff / window_snare_immediate)
-                    immediate_value = snare_multi * time_weight  # Full strength for snare
+                dt = current_time - snare_time
+                if 0.0 <= dt <= window_snare_immediate:
+                    time_weight = 1.0 - (dt / window_snare_immediate)
+                    immediate_value = snare_multi * time_weight
                     snare_contribution = max(snare_contribution, immediate_value)
-        
-        # Then process extended snare fadeouts (ensure they reach min_strength)
+
+        # Extended snare fadeouts (unchanged directional)
         for snare_time, snare_strength, fadeout_time in snare_fadeouts:
-            # Check if this time point is within the fadeout window
             if snare_time <= current_time <= (snare_time + fadeout_time):
-                # Calculate how far into the fadeout we are
-                fadeout_progress = (current_time - snare_time) / fadeout_time
-                
-                # Make sure we reach EXACTLY min_strength at the end
-                if fadeout_progress >= 0.99:  # Just before the end
+                fadeout_progress = (current_time - snare_time) / max(fadeout_time, 1e-12)
+                if fadeout_progress >= 0.99:
                     snare_value = min_strength
                 else:
-                    # Create a smoother decay curve
-                    decay_factor = 1.0 - fadeout_progress
-                    decay_factor = decay_factor ** 1.5  # Smoother curve
-                    
-                    # Calculate contribution with gradual falloff to min_strength
+                    decay_factor = (1.0 - fadeout_progress) ** 1.5
                     snare_value = min_strength + (snare_multi - min_strength) * decay_factor
-                
                 snare_contribution = max(snare_contribution, snare_value)
-        
-        # Take the maximum of kick and snare contributions
+
+        # Max of contributions
         current_value = max(kick_contribution, snare_contribution)
-        
+
         envelope_times.append(current_time)
         envelope_values.append(current_value)
-        
-        # Move to next time step
+
         current_time += resolution_sec
+
+    # Add final point if needed
+    if envelope_times and envelope_times[-1] < segment_end:
+        envelope_times.append(segment_end)
+        envelope_values.append(min_strength)
     
     # Add final point if needed
     if envelope_times[-1] < segment_end:
@@ -294,6 +272,10 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
     boundary_secs = 1.5
     seg_start_abs = float(segment.get("start", 0.0))
     seg_end_abs = float(segment.get("end", seg_start_abs))
+    # Compute song ends (absolute seconds)
+    song_start_abs = 0.0
+    song_end_abs = (float(total_frames) / float(fps)) if (total_frames is not None and fps > 0) else None
+
     for p in (pauses or []):
         start_f, end_f = int(p[0]), int(p[1])
         ps = float(start_f) / fps
@@ -301,31 +283,28 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
         if pe <= ps:
             continue
 
-        # Consider both the end of this segment and the start (which is the next segment's boundary)
+        # Detect boundary-straddling or proximity
         crosses_start = (ps <= seg_start_abs <= pe)
         crosses_end = (ps <= seg_end_abs <= pe)
         near_start = (pe >= seg_start_abs - boundary_secs) and (ps <= seg_start_abs + boundary_secs)
         near_end = (pe >= seg_end_abs - boundary_secs) and (ps <= seg_end_abs + boundary_secs)
-
-        # If pause is around/straddling either boundary, use the same fast ramp anchored to [ps, pe]
         is_boundary_sensitive = crosses_start or crosses_end or near_start or near_end
-        ramp_ratio = 0.15 if is_boundary_sensitive else 0.33
+
+        # Fast ramp fraction near boundaries, normal otherwise
+        ramp_ratio = 0.12 if is_boundary_sensitive else 0.33
         ramp_end = ps + (pe - ps) * ramp_ratio
+        ramp_end = min(ramp_end, pe)  # guard tiny pauses
 
-        in_pause = (times_abs >= ps) & (times_abs <= pe)
-        if not in_pause.any():
-            continue
-
+        # Apply attenuation: ramp down early, then hold zero
         in_ramp = (times_abs >= ps) & (times_abs <= ramp_end)
         if in_ramp.any():
             prog = (times_abs[in_ramp] - ps) / max(ramp_end - ps, 1e-12)
-            # Boundary-sensitive: linear drop for quicker fall; else cosine ease
-            cand = (1.0 - prog) if is_boundary_sensitive else np.cos(0.5 * np.pi * prog)
+            cand = (1.0 - prog) ** 2.5 if is_boundary_sensitive else np.cos(0.5 * np.pi * prog)
             scale[in_ramp] = np.minimum(scale[in_ramp], cand)
 
-        after_ramp = (times_abs > ramp_end) & (times_abs <= pe)
-        if after_ramp.any():
-            scale[after_ramp] = 0.0
+        in_hold = (times_abs > ramp_end) & (times_abs <= pe)
+        if in_hold.any():
+            scale[in_hold] = 0.0
 
     # Apply pause scaling first
     refined_values = values * scale
@@ -349,8 +328,8 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
                 post_idx = int(post_candidates[0])
                 v_post = float(values[post_idx])  # use raw envelope (pre-pauses)
                 if v_post < 0.5:
-                    prog = (times_abs[mask_first] - ss) / max(se - ss, 1e-12)  # 0..1
-                    eased = np.sin(0.5 * np.pi * prog)  # 0 -> 1 smoothly
+                    prog = (times_abs[mask_first] - ss) / max(se - ss, 1e-12)
+                    eased = np.sin(0.5 * np.pi * prog)
                     refined_values[mask_first] = v_post * eased
 
         # Last silent range: full fade to zero if it reaches song end; otherwise reach zero before 50%
@@ -364,7 +343,7 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
                 mask_full = (times_abs >= ss2) & (times_abs <= se2)
                 if mask_full.any():
                     prog = (times_abs[mask_full] - ss2) / max(se2 - ss2, 1e-12)
-                    eased_down = np.cos(0.5 * np.pi * prog)  # 1 -> 0 smoothly
+                    eased_down = np.cos(0.5 * np.pi * prog)
                     refined_values[mask_full] = refined_values[mask_full] * eased_down
                 mask_after = (times_abs > se2)
                 if mask_after.any():
@@ -381,10 +360,61 @@ def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43
                 if mask_after.any():
                     refined_values[mask_after] = 0.0
 
+    def merge_ranges(ranges_ms):
+        rng = [(int(s), int(e)) for s, e in ranges_ms if int(e) > int(s)]
+        if not rng:
+            return []
+        rng.sort(key=lambda x: x[0])
+        merged = [rng[0]]
+        for s, e in rng[1:]:
+            ps, pe = merged[-1]
+            if s <= pe:  # overlap/adjacent
+                merged[-1] = (ps, max(pe, e))
+            else:
+                merged.append((s, e))
+        return [{"start_ms": s, "end_ms": e} for s, e in merged]
+
+    existing_ranges = envelope.get("active_ranges", []) or []
+    base_ranges_ms = [(int(r.get("start_ms", 0)), int(r.get("end_ms", 0))) for r in existing_ranges if r is not None]
+
+    # Pauses -> active ranges (segment-local), using ceil for start and floor for end
+    pause_ranges_ms = []
+    for p in (pauses or []):
+        start_f, end_f = int(p[0]), int(p[1])
+        ps = float(start_f) / fps
+        pe = float(end_f) / fps
+        s_abs = max(ps, seg_start_abs)
+        e_abs = min(pe, seg_end_abs)
+        if e_abs > s_abs:
+            s_ms = int(np.ceil((s_abs - seg_start_abs) * 1000.0))
+            e_ms = int(np.floor((e_abs - seg_start_abs) * 1000.0))
+            if e_ms > s_ms:
+                pause_ranges_ms.append((s_ms, e_ms))
+
+    # Silent ranges that touch song start/end -> active ranges (segment-local)
+    silent_song_edges_ms = []
+    for s in (silent_ranges or []):
+        start_f = int(s[0]); end_f = int(s[1])
+        ss_abs = float(start_f) / fps
+        se_abs = float(end_f) / fps
+        touches_start = (ss_abs <= song_start_abs + 1e-9)
+        touches_end = (song_end_abs is not None) and (se_abs >= song_end_abs - 1e-9)
+        if not (touches_start or touches_end):
+            continue
+        s_abs = max(ss_abs, seg_start_abs)
+        e_abs = min(se_abs, seg_end_abs)
+        if e_abs > s_abs:
+            s_ms = int(np.ceil((s_abs - seg_start_abs) * 1000.0))
+            e_ms = int(np.floor((e_abs - seg_start_abs) * 1000.0))
+            if e_ms > s_ms:
+                silent_song_edges_ms.append((s_ms, e_ms))
+
+    active_ranges = merge_ranges(base_ranges_ms + pause_ranges_ms + silent_song_edges_ms)
+
     return {
         "times": envelope["times"],
         "values": refined_values.tolist(),
         "segment_start": envelope.get("segment_start", segment.get("start", 0.0)),
         "segment_end": envelope.get("segment_end", segment.get("end", 0.0)),
-        "active_ranges": envelope.get("active_ranges", []),
+        "active_ranges": active_ranges,
     }
