@@ -11,9 +11,24 @@ def calculate_light_strength_envelope(song_data, struct_data):
         beats=beats, 
         segments=segments)
     
+    # Pull silence metadata (frames at 43 fps by default)
+    pauses = struct_data.get("pauses", [])
+    silent_ranges = struct_data.get("silent_ranges", struct_data.get("quiet_ranges", []))
+    fps = int(struct_data.get("fps", 43))
+    total_frames = len(struct_data.get("rms", [])) if isinstance(struct_data.get("rms", []), (list, np.ndarray)) else None
+
     for segment in segments:
         light_envelope = calculate_drums_envelope(segment)
-        segment["drum_analysis"]["light_strength_envelope"] = light_envelope
+        # Refine with pauses and silent ranges
+        refined = refine_envelope_with_pauses(
+            envelope=light_envelope,
+            segment=segment,
+            pauses=pauses,
+            silent_ranges=silent_ranges,
+            fps=fps,
+            total_frames=total_frames
+        )
+        segment["drum_analysis"]["light_strength_envelope"] = refined
 
     print(f"--------Calculated dimmer scaling function for {len(segments)} segments ({segments[0]['start']:.2f}s to {segments[-1]['end']:.2f}s)")
     return [{"segments": segments}]
@@ -265,4 +280,88 @@ def calculate_drums_envelope(segment,
         "segment_start": segment_start,
         "segment_end": segment_end,
         "active_ranges": active_ranges
+    }
+
+def refine_envelope_with_pauses(envelope, segment, pauses, silent_ranges, fps=43, total_frames=None):
+    times_rel = np.asarray(envelope["times"], dtype=np.float64)
+    values = np.asarray(envelope["values"], dtype=np.float64)
+    seg_start = float(envelope.get("segment_start", segment.get("start", 0.0)))
+
+    times_abs = seg_start + times_rel
+    scale = np.ones_like(times_abs, dtype=np.float64)
+
+    # 1) Apply pauses: ramp to 0 in first 33%, then hold 0 through the pause
+    for start_f, end_f in (pauses or []):
+        ps = float(start_f) / fps
+        pe = float(end_f) / fps
+        if pe <= ps:
+            continue
+        ramp_end = ps + (pe - ps) * 0.33
+
+        in_pause = (times_abs >= ps) & (times_abs <= pe)
+        if not in_pause.any():
+            continue
+
+        in_ramp = (times_abs >= ps) & (times_abs <= ramp_end)
+        if in_ramp.any():
+            prog = (times_abs[in_ramp] - ps) / max(ramp_end - ps, 1e-12)
+            cand = np.cos(0.5 * np.pi * prog)  # 1 -> 0 smoothly
+            scale[in_ramp] = np.minimum(scale[in_ramp], cand)
+
+        after_ramp = (times_abs > ramp_end) & (times_abs <= pe)
+        if after_ramp.any():
+            scale[after_ramp] = 0.0
+
+    # Apply pause scaling first
+    refined_values = values * scale
+
+    # 2) Handle silent_ranges special cases: first and last ranges
+    if silent_ranges:
+        # Normalize to sorted list of (int,int)
+        sranges = sorted([(int(s), int(e)) for s, e in silent_ranges], key=lambda x: x[0])
+
+        # First silent range: fade into first envelope value after the range IF that value < 0.5
+        first_s, first_e = sranges[0]
+        ss = float(first_s) / fps
+        se = float(first_e) / fps
+
+        # Only apply if the segment overlaps the first silent range
+        mask_first = (times_abs >= ss) & (times_abs <= se)
+        if mask_first.any():
+            # Find first sample strictly after the range
+            post_candidates = np.where(times_abs > se)[0]
+            if post_candidates.size > 0:
+                post_idx = int(post_candidates[0])
+                v_post = float(values[post_idx])  # use raw envelope (pre-pauses), as requested
+                if v_post < 0.5:
+                    # Ease-in from 0 to v_post across the range
+                    prog = (times_abs[mask_first] - ss) / max(se - ss, 1e-12)  # 0..1
+                    eased = np.sin(0.5 * np.pi * prog)  # 0 -> 1 smoothly
+                    refined_values[mask_first] = v_post * eased
+                # If v_post >= 0.5: do nothing (keep current refined values)
+
+        # Last silent range: fade away to 0 by 50% of the range
+        last_s, last_e = sranges[-1]
+        ss2 = float(last_s) / fps
+        se2 = float(last_e) / fps
+        if se2 > ss2:
+            half = ss2 + 0.5 * (se2 - ss2)
+            # First half: ease down to 0
+            mask_first_half = (times_abs >= ss2) & (times_abs <= half)
+            if mask_first_half.any():
+                prog = (times_abs[mask_first_half] - ss2) / max(half - ss2, 1e-12)  # 0..1
+                eased_down = np.cos(0.5 * np.pi * prog)  # 1 -> 0 smoothly
+                refined_values[mask_first_half] = refined_values[mask_first_half] * eased_down
+            # Second half: clamp to 0
+            mask_second_half = (times_abs > half) & (times_abs <= se2)
+            if mask_second_half.any():
+                refined_values[mask_second_half] = 0.0
+
+    # Return envelope with refined values; keep times unchanged (still relative)
+    return {
+        "times": envelope["times"],
+        "values": refined_values.tolist(),
+        "segment_start": envelope.get("segment_start", segment.get("start", 0.0)),
+        "segment_end": envelope.get("segment_end", segment.get("end", 0.0)),
+        "active_ranges": envelope.get("active_ranges", []),
     }
