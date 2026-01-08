@@ -1453,7 +1453,6 @@ class ShowStructurer:
             length = (segments[i]["end"] - segments[i]["start"])*1000
             queues = []
             if segments[i]["is_chorus_section"]:
-                found = True
                 # Use the single primary chaser for all energetic segments
                 current_chaser = primary_chaser
                 is_focus_segment = segments[i]["label"] == show.struct["focus"]["first"]
