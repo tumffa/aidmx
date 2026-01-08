@@ -1,11 +1,17 @@
 import librosa
 import numpy as np
 from src.services.audio_analysis import drum_analysis_strobes
-from src.services.audio_analysis import drum_analysis_dimmer
+from src.services.audio_analysis import drum_analysis_beats
 from src.services.audio_analysis.seperate_drums_larsnet import separate_drums_with_larsnet
 
+def analyze_audio(song_data, struct_data):
+    params = []
+    params += initialize_song_metrics(song_data, struct_data=struct_data)
+    params += struct_stats(song_data, name=song_data.get("name"), struct_data=struct_data)
+    params += segment(song_data.get("name"), struct_data=struct_data)
+    return params
 
-def initialize_song_metrics(song_data, struct_data=None):
+def initialize_song_metrics(song_data, struct_data):
     """Initial analysis to get basic metrics like RMS and separated drum onsets."""
     print("------Initializing song audio metrics")
 
@@ -26,7 +32,7 @@ def initialize_song_metrics(song_data, struct_data=None):
     larsnet_drums = kick_snare_toms["kick"] + kick_snare_toms["snare"] + kick_snare_toms["toms"]
     onset_parts = drum_analysis_strobes.get_onset_parts(segments=struct_data["segments"], input=larsnet_drums, sr=sr)
 
-    enriched_segments = drum_analysis_dimmer.analyze_drum_beat_pattern(
+    enriched_segments = drum_analysis_beats.analyze_drum_beat_pattern(
         demix_path=song_data["demixed"], 
         beats=struct_data["beats"], 
         segments=struct_data["segments"])
@@ -179,15 +185,18 @@ def struct_stats(song_data, name=None, category=None, path=None, rms=False, para
     params = params
     broken_bridges = False
 
-    if rms == False:
-        rms = struct_data['rms']
+    # Ensure numpy arrays
+    if rms is False:
+        rms = np.asarray(struct_data['rms'], dtype=np.float64)
+    else:
+        rms = np.asarray(rms, dtype=np.float64)
 
-    drums_rms = struct_data['drums_rms']
-    bass_rms = struct_data['bass_rms']
-    drums_rms = [drums_rms[i] + bass_rms[i] for i in range(len(drums_rms))]
+    drums_rms = np.asarray(struct_data['drums_rms'], dtype=np.float64)
+    bass_rms = np.asarray(struct_data['bass_rms'], dtype=np.float64)
+    drums_rms = drums_rms + bass_rms
 
     segments = struct_data['segments']
-    song_rms = struct_data['rms']
+    song_rms = np.asarray(struct_data['rms'], dtype=np.float64)
 
     total_volumes = []
     avg_volumes = []
@@ -197,6 +206,10 @@ def struct_stats(song_data, name=None, category=None, path=None, rms=False, para
     is_quiet = False
     labels = {}
     i = 0
+
+    # Precompute frames-per-second factor
+    fps = 43
+
     for segment in segments:
         if segment["end"] - segment["start"] <= 1.5:
             segment["avg_combined"] = 0
@@ -210,36 +223,34 @@ def struct_stats(song_data, name=None, category=None, path=None, rms=False, para
         segment_start = segment['start']
         segment_end = segment['end']
 
-        rms_slice = rms[int(segment_start*43):int(segment_end*43)]
-        temp_avg = sum(rms_slice) / len(rms_slice)
-        pauses = get_pauses_for_segment(rms_slice, temp_avg*0.2)
-        rms_slice = get_modified_rms(song_data, name=name, rms=rms_slice, pauses=pauses)
-        rms_slice = [i for i in rms_slice if i != 0]
+        start_idx = int(segment_start * fps)
+        end_idx = int(segment_end * fps)
 
-        drums_slice = drums_rms[int(segment_start*43):int(segment_end*43)]
-        temp_avg = sum(drums_slice) / len(drums_slice)
-        pauses = get_pauses_for_segment(drums_slice, temp_avg*0.2)
-        drums_slice = get_modified_rms(song_data, name=name, rms=drums_slice, pauses=pauses)
-        drums_slice = [i for i in drums_slice if i != 0]
+        # RMS slice and pauses
+        rms_slice = rms[start_idx:end_idx].copy()
+        temp_avg = float(np.mean(rms_slice)) if rms_slice.size else 0.0
+        pauses = get_pauses_for_segment(rms_slice, temp_avg * 0.2)
+        rms_slice = np.asarray(get_modified_rms(song_data, name=name, rms=rms_slice, pauses=pauses), dtype=np.float64)
+        rms_slice = rms_slice[rms_slice != 0]
 
-        song_slice = song_rms[int(segment_start*43):int(segment_end*43)]
-        temp_avg = sum(song_slice) / len(song_slice)
-        pauses = get_pauses_for_segment(song_slice, temp_avg*0.2)
-        song_slice = get_modified_rms(song_data, name=name, rms=song_slice, pauses=pauses)
-        song_slice = [i for i in song_slice if i != 0]
+        # Drums slice and pauses
+        drums_slice = drums_rms[start_idx:end_idx].copy()
+        temp_avg = float(np.mean(drums_slice)) if drums_slice.size else 0.0
+        pauses = get_pauses_for_segment(drums_slice, temp_avg * 0.2)
+        drums_slice = np.asarray(get_modified_rms(song_data, name=name, rms=drums_slice, pauses=pauses), dtype=np.float64)
+        drums_slice = drums_slice[drums_slice != 0]
 
-        if len(rms_slice) > 0:
-            average_rms = sum(rms_slice) / len(rms_slice)
-        else:
-            average_rms = 0    
-        if len(drums_slice) > 0:
-            average_drums = sum(drums_slice) / len(drums_slice)
-        else:
-            average_drums = 0
-        if len(song_slice) > 0:
-            average_total_rms = sum(song_slice) / len(song_slice)
-        else:
-            average_total_rms = 0
+        # Song slice and pauses
+        song_slice = song_rms[start_idx:end_idx].copy()
+        temp_avg = float(np.mean(song_slice)) if song_slice.size else 0.0
+        pauses = get_pauses_for_segment(song_slice, temp_avg * 0.2)
+        song_slice = np.asarray(get_modified_rms(song_data, name=name, rms=song_slice, pauses=pauses), dtype=np.float64)
+        song_slice = song_slice[song_slice != 0]
+
+        average_rms = float(np.mean(rms_slice)) if rms_slice.size else 0.0
+        average_drums = float(np.mean(drums_slice)) if drums_slice.size else 0.0
+        average_total_rms = float(np.mean(song_slice)) if song_slice.size else 0.0
+
         segment["avg_combined"] = average_total_rms
         segment['avg_volume'] = average_rms
         segment['avg_drums'] = average_drums
@@ -247,61 +258,61 @@ def struct_stats(song_data, name=None, category=None, path=None, rms=False, para
         total_volumes.append(average_total_rms)
         drum_volumes.append(average_drums)
         i += 1
-    song_average = sum(avg_volumes) / len(avg_volumes)
-    total_rms = sum(song_rms) / len(song_rms)
-    drum_average = sum(drum_volumes) / len(drum_volumes)
+
+    song_average = float(np.mean(avg_volumes)) if avg_volumes else 0.0
+    total_rms = float(np.mean(song_rms)) if song_rms.size else 0.0
+    drum_average = float(np.mean(drum_volumes)) if drum_volumes else 0.0
 
     verses = [segment for segment in segments if segment['label'] == 'verse']
-    if len(verses) != 0:
-        verses_avg = sum([segment['avg_combined'] for segment in verses]) / len(verses)
-        verses_avg2 = sum([segment['avg_volume'] for segment in verses]) / len(verses)
-    else:
-        verses_avg = 0
-        verses_avg2 = 0
-    
     choruses = [segment for segment in segments if segment['label'] == 'chorus']
-    if len(choruses) != 0:
-        choruses_avg = sum([segment['avg_combined'] for segment in choruses]) / len(choruses)
-        choruses_avg2 = sum([segment['avg_volume'] for segment in choruses]) / len(choruses)
-    else:
-        choruses_avg = 0
-        choruses_avg2 = 0
 
-    if len(verses) != 0:
-        versesdrum_average = sum([segment['avg_drums'] for segment in verses]) / len(verses)
-    if len(choruses) != 0:
-        chorusesdrum_average = sum([segment['avg_drums'] for segment in choruses]) / len(choruses)
-    else:
-        chorusesdrum_average = 0
+    verses_avg = float(np.mean([s['avg_combined'] for s in verses])) if verses else 0.0
+    verses_avg2 = float(np.mean([s['avg_volume'] for s in verses])) if verses else 0.0
+    choruses_avg = float(np.mean([s['avg_combined'] for s in choruses])) if choruses else 0.0
+    choruses_avg2 = float(np.mean([s['avg_volume'] for s in choruses])) if choruses else 0.0
+
+    versesdrum_average = float(np.mean([s['avg_drums'] for s in verses])) if verses else 0.0
+    chorusesdrum_average = float(np.mean([s['avg_drums'] for s in choruses])) if choruses else 0.0
 
     if "inst" in labels:
         inst = [segment for segment in segments if segment['label'] == 'inst']
-        inst_average = sum([segment['avg_combined'] for segment in inst]) / len(inst)
-        inst_average2 = sum([segment['avg_volume'] for segment in inst]) / len(inst)
-        average_volumes = {"verse": (verses_avg, verses_avg2), "chorus": (choruses_avg, choruses_avg2), "inst": (inst_average, inst_average2) }
+        inst_average = float(np.mean([s['avg_combined'] for s in inst])) if inst else 0.0
+        inst_average2 = float(np.mean([s['avg_volume'] for s in inst])) if inst else 0.0
+        average_volumes = {"verse": (verses_avg, verses_avg2), "chorus": (choruses_avg, choruses_avg2), "inst": (inst_average, inst_average2)}
     else:
         average_volumes = {"verse": (verses_avg, verses_avg2), "chorus": (choruses_avg, choruses_avg2)}
+
     if choruses_avg > total_rms:
         loud_sections.append(("chorus", (choruses_avg, choruses_avg2)))
     if verses_avg > total_rms:
         loud_sections.append(("verse", (verses_avg, verses_avg2)))
     if "inst" in labels:
+        inst = [segment for segment in segments if segment['label'] == 'inst']
+        inst_average = float(np.mean([s['avg_combined'] for s in inst])) if inst else 0.0
+        inst_average2 = float(np.mean([s['avg_volume'] for s in inst])) if inst else 0.0
         if inst_average > total_rms:
             loud_sections.append(("inst", (inst_average, inst_average2)))
-    loud_sections_average = sum([section[1][0] for section in loud_sections]) / len(loud_sections)
-    loud_sections_average2 = sum([section[1][1] for section in loud_sections]) / len(loud_sections)
-    # Sort sections by average loudness in descending order
+
+    loud_sections_average = float(np.mean([sec[1][0] for sec in loud_sections])) if loud_sections else 0.0
+    loud_sections_average2 = float(np.mean([sec[1][1] for sec in loud_sections])) if loud_sections else 0.0
+
     sorted_sections = sorted(loud_sections, key=lambda item: item[1][0], reverse=True)
-    # Assign sections to focus dictionary based on loudness
     focuses = ["first", "second", "third"]
     for i in range(len(sorted_sections)):
         focus[focuses[i]] = sorted_sections[i][0]
 
-    params.append({'segments': segments, 'average_rms': song_average,
-                    "loud_sections": [section[0] for section in loud_sections], 
-                    "focus": focus, "is_quiet": is_quiet, "loud_sections_average": loud_sections_average,
-                      "loud_sections_average2": loud_sections_average2, "average_volumes": average_volumes,
-                        "drum_average": drum_average, "broken_bridges": broken_bridges})
+    params.append({
+        'segments': segments,
+        'average_rms': song_average,
+        "loud_sections": [section[0] for section in loud_sections],
+        "focus": focus,
+        "is_quiet": is_quiet,
+        "loud_sections_average": loud_sections_average,
+        "loud_sections_average2": loud_sections_average2,
+        "average_volumes": average_volumes,
+        "drum_average": drum_average,
+        "broken_bridges": broken_bridges
+    })
     return params
 
 
@@ -346,128 +357,100 @@ def merge_same_category_sections(sections):
     return merged_sections
 
 def get_modified_rms(song_data, name, rms=False, category=None, pauses=False, struct_data=None):
-    if type(rms) != list:
-        rms, average = get_rms(song_data, category=category)
+    # Normalize inputs to numpy arrays
+    if isinstance(rms, list):
+        rms = np.asarray(rms, dtype=np.float64)
+    elif isinstance(rms, np.ndarray):
+        rms = rms.astype(np.float64, copy=True)
     else:
-        rms = rms
-    if type(pauses) != list:
-        pauses = get_pauses(name, struct_data)
+        rms, _ = get_rms(song_data, category=category)
+        rms = np.asarray(rms, dtype=np.float64)
+
+    if isinstance(pauses, list):
+        pause_ranges = pauses
     else:
-        pauses = pauses
+        pause_ranges, _ = get_pauses(name, struct_data)
 
-    # Initialize the modified RMS list
-    modified_rms = rms
-
-    # Set the RMS values between the pauses to 0
-    for pause in pauses:
-        start, end = pause[0], pause[1]
-        for i in range(start, end):
-            modified_rms[i] = 0
-
+    modified_rms = rms.copy()
+    # Zero-out ranges via slicing
+    for start, end in pause_ranges:
+        modified_rms[start:end] = 0.0
+    
     return modified_rms
 
 def get_pauses(name, struct_data):
-    # Calculate the RMS of the paths
-    drum_rms = struct_data["drums_rms"]
-    bass_rms = struct_data["bass_rms"]
-    other_rms = struct_data["other_rms"]
-    vocals_rms = struct_data["vocals_rms"]
-    rms = struct_data["rms"]
-    
-    average_volume = struct_data["total_rms"]
-    # Define a threshold for what constitutes a "quiet" section
-    quiet_threshold_drums = 0.2*struct_data["drums_average"]
-    quiet_threshold_bass = 0.2*struct_data["bass_average"]
-    quiet_threshold_other = 0.2*struct_data["other_average"]
-    quiet_threshold_vocals = 0.2*struct_data["vocals_average"]
-    quiet_threshold_rms = 0.2*average_volume
-    
-    # Find the quiet sections in each track
-    drum_quiet = [x < quiet_threshold_drums for x in drum_rms]
-    bass_quiet = [x < quiet_threshold_bass for x in bass_rms]
-    other_quiet = [x < quiet_threshold_other for x in other_rms]
-    vocals_quiet = [x < quiet_threshold_vocals for x in vocals_rms]
-    rms_quiet = [x < quiet_threshold_rms for x in rms]
+    drum_rms = np.asarray(struct_data["drums_rms"], dtype=np.float64)
+    bass_rms = np.asarray(struct_data["bass_rms"], dtype=np.float64)
+    other_rms = np.asarray(struct_data["other_rms"], dtype=np.float64)
+    vocals_rms = np.asarray(struct_data["vocals_rms"], dtype=np.float64)
+    rms = np.asarray(struct_data["rms"], dtype=np.float64)
 
-    combined_quiet = [0] * max(len(drum_quiet), len(bass_quiet), len(other_quiet), len(vocals_quiet))
-    # Combine the quiet sections into a single array
-    for i in range(max(len(drum_quiet), len(bass_quiet), len(other_quiet), len(vocals_quiet), len(rms_quiet))):
-        if drum_quiet[i]:
-            combined_quiet[i] += 1
-        if bass_quiet[i]:
-            combined_quiet[i] += 1
-        if other_quiet[i]:
-            combined_quiet[i] += 1
-        if vocals_quiet[i]:
-            combined_quiet[i] += 1
-        if rms_quiet[i]:
-            combined_quiet[i] += 1
-    # Define the window size and the minimum number of quiet frames
+    average_volume = struct_data["total_rms"]
+    quiet_threshold_drums = 0.2 * struct_data["drums_average"]
+    quiet_threshold_bass = 0.2 * struct_data["bass_average"]
+    quiet_threshold_other = 0.2 * struct_data["other_average"]
+    quiet_threshold_vocals = 0.2 * struct_data["vocals_average"]
+    quiet_threshold_rms = 0.2 * average_volume
+
+    # Align lengths safely
+    L = min(len(drum_rms), len(bass_rms), len(other_rms), len(vocals_rms), len(rms))
+
+    drum_quiet = (drum_rms[:L] < quiet_threshold_drums)
+    bass_quiet = (bass_rms[:L] < quiet_threshold_bass)
+    other_quiet = (other_rms[:L] < quiet_threshold_other)
+    vocals_quiet = (vocals_rms[:L] < quiet_threshold_vocals)
+    rms_quiet = (rms[:L] < quiet_threshold_rms)
+
+    combined_quiet = drum_quiet.astype(np.int32) + bass_quiet.astype(np.int32) + other_quiet.astype(np.int32) + vocals_quiet.astype(np.int32) + rms_quiet.astype(np.int32)
+
     window_size = 22
     min_quiet_frames = 20
 
-    # Initialize an array to hold the quiet sections
-    quiet_sections = [0] * len(combined_quiet)
+    # Window counts where at least 3 tracks are quiet
+    quiet_mask = (combined_quiet >= 3).astype(np.int32)
+    counts = np.convolve(quiet_mask, np.ones(window_size, dtype=np.int32), mode='valid')
+    window_ok = (counts >= min_quiet_frames).astype(np.int32)
 
-    # For each window of frames
-    for i in range(len(combined_quiet) - window_size + 1):
-        # Count how many frames in the window are quiet
-        quiet_count = sum(1 for j in range(i, i + window_size) if combined_quiet[j] >= 3)
-        
-        # If at least min_quiet_frames are quiet, mark the entire window as a quiet section
-        if quiet_count >= min_quiet_frames:
-            for j in range(i, i + window_size):
-                quiet_sections[j] = 1
+    # Expand window flags to full-length coverage
+    coverage = np.convolve(window_ok, np.ones(window_size, dtype=np.int32), mode='full')[:L] > 0
 
-    # Find the beginning and end indexes of the quiet sections
-    quiet_ranges = []
-    start_index = None
-    for i, is_quiet in enumerate(quiet_sections):
-        if is_quiet and start_index is None:
-            start_index = i
-        elif not is_quiet and start_index is not None:
-            quiet_ranges.append((start_index, i))
-            start_index = None
+    # Extract ranges
+    padded = np.pad(coverage.astype(np.int8), (1, 1), mode='constant', constant_values=0)
+    diffs = np.diff(padded)
+    starts = np.where(diffs == 1)[0]
+    ends = np.where(diffs == -1)[0]
+    # Cast to Python ints for JSON safety
+    quiet_ranges = [(int(s), int(e)) for s, e in zip(starts, ends)]
 
-    # If the last section is quiet, add it to the list
-    if start_index is not None:
-        quiet_ranges.append((start_index, len(quiet_sections)))
     silent_pre_segments = []
+    fps = 43
     for section in quiet_ranges:
         for segment in struct_data["segments"]:
-            if abs(segment["start"]*43 - section[1]) < 100: 
-                silent_pre_segments.append(section)
+            if abs(int(segment["start"] * fps) - section[1]) < 100:
+                silent_pre_segments.append((int(section[0]), int(section[1])))
                 break
+
     return silent_pre_segments, quiet_ranges
 
 def get_pauses_for_segment(rms, threshold):
-    # Define a threshold for what constitutes a "quiet" section
-    quiet_threshold = threshold
-    # Find the quiet sections in each track
-    quiet = [x < quiet_threshold for x in rms]
-    # Define the window size and the minimum number of quiet frames
+    rms = np.asarray(rms, dtype=np.float64)
+    quiet = rms < threshold
+
     window_size = 50
     min_quiet_frames = 40
-    # Initialize an array to hold the quiet sections
-    quiet_sections = [0] * len(quiet)
-    # For each window of frames
-    for i in range(len(quiet) - window_size + 1):
-        # Count how many frames in the window are quiet
-        quiet_count = sum(1 for j in range(i, i + window_size) if quiet[j])
-        # If at least min_quiet_frames are quiet, mark the entire window as a quiet section
-        if quiet_count >= min_quiet_frames:
-            for j in range(i, i + window_size):
-                quiet_sections[j] = 1
-    # Find the beginning and end indexes of the quiet sections
-    quiet_ranges = []
-    start_index = None
-    for i, is_quiet in enumerate(quiet_sections):
-        if is_quiet and start_index is None:
-            start_index = i
-        elif not is_quiet and start_index is not None:
-            quiet_ranges.append((start_index, i))
-            start_index = None
-    # If the last section is quiet, add it to the list
-    if start_index is not None:
-        quiet_ranges.append((start_index, len(quiet_sections)))
+
+    # Counts of quiet frames per window
+    counts = np.convolve(quiet.astype(np.int32), np.ones(window_size, dtype=np.int32), mode='valid')
+    window_ok = (counts >= min_quiet_frames).astype(np.int32)
+
+    # Expand window flags to full-length coverage
+    coverage = np.convolve(window_ok, np.ones(window_size, dtype=np.int32), mode='full')[:len(rms)] > 0
+
+    # Extract ranges
+    padded = np.pad(coverage.astype(np.int8), (1, 1), mode='constant', constant_values=0)
+    diffs = np.diff(padded)
+    starts = np.where(diffs == 1)[0]
+    ends = np.where(diffs == -1)[0]
+    # Cast to Python ints for JSON safety
+    quiet_ranges = [(int(s), int(e)) for s, e in zip(starts, ends)]
     return quiet_ranges

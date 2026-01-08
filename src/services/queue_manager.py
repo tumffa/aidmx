@@ -46,11 +46,6 @@ class QueueManager:
         print(f"Finished\n")
 
     def generate(self, audio_name, strobes, simple, qlc_delay, qlc_lag):
-        print(f"--Analyzing data")
-        struct_data = self.dm.get_struct_data(audio_name)
-        params = audio_analysis.segment(audio_name, struct_data)
-        self.dm.update_struct_data(audio_name, params, indent=2)
-        
         print(f"--Generating show with strobes={strobes}, simple={simple}, qlc_delay={qlc_delay} sec, qlc_lag={qlc_lag}")
         self.qlc.create_copy(audio_name)
         scripts_dict = self.structurer.generate_show(
