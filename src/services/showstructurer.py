@@ -1491,7 +1491,7 @@ class ShowStructurer:
             else:
                 queues.append(self.simple_color(
                     name, show, color=idle_colour, dimmer=255, length=length, 
-                    start=start_time, queuename=f"color{i}", scale_dimmer="flow"))
+                    start=start_time, queuename=f"color{i}", scale_dimmer="both"))
 
             if strobes and onset_parts:
                 strobe_ranges = self.preprocess_onset_ranges(segments[i]["start"], segments[i]["end"], onset_parts)
@@ -1629,16 +1629,16 @@ class ShowStructurer:
             f = (flag or "").strip().lower()
             if not f:
                 return None
+            # Always apply the envelope function; it already returns baseline (e.g., 0.01) outside ranges
             if f == "beat":
-                return beat_fn if _in_ranges_simple(beat_ranges, t_ms) else None
+                return beat_fn
             if f == "flow":
-                return flow_fn if _in_ranges_simple(flow_ranges, t_ms) else None
+                return flow_fn
             if f == "snare":
-                return snare_fn if _in_ranges_simple(snare_ranges, t_ms) else None
+                return snare_fn
             if f == "both":
+                # Prefer the mapped source if present; otherwise default to beat
                 src = _source_in_both(t_ms)
-                if src is None:
-                    return None
                 return flow_fn if src == 1 else snare_fn if src == 2 else beat_fn
             return None
 
