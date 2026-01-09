@@ -381,23 +381,44 @@ def get_modified_rms(song_data, name, rms=False, category=None, pauses=False, st
 def get_pauses(
     name,
     struct_data,
-    alpha=0.2,                 # threshold factor vs segment-average (also used for song-level total RMS)
-    active_frac_min=0.25,      # min fraction of frames above threshold to call an instrument "active"
-    run_min_floor_sec=0.5,     # min duration for a quiet run to be eligible
-    run_prominence_std=0.5,    # how many std above the mean run length counts as "clearly above"
+    # Instrument-specific tunables
+    alpha_drums=0.2,
+    alpha_bass=0.2,
+    alpha_other=0.2,
+    alpha_vocals=0.2,
+    active_frac_min_drums=0.4,
+    active_frac_min_bass=0.4,
+    active_frac_min_other=0.4,
+    active_frac_min_vocals=0.4,
+    run_min_floor_sec_drums=0.5,
+    run_min_floor_sec_bass=0.5,
+    run_min_floor_sec_other=0.5,
+    run_min_floor_sec_vocals=0.5,
+    run_prominence_std_drums=0.5,
+    run_prominence_std_bass=0.5,
+    run_prominence_std_other=0.5,
+    run_prominence_std_vocals=0.5,
+    boundary_margin_sec=1.0,
+    # Drum-activity gating for interior pauses
+    drums_activity_ratio_min=0.2,          # min drums avg / total avg within segment to allow interior pauses
+    high_activity_percentile_drums=20.0,   # percentile used to detect “active” drum frames
+    interior_guard_sec=1.0                 # activity must exist within this window before and after a quiet run
 ):
     drum_rms = np.asarray(struct_data["drums_rms"], dtype=np.float64)
-    bass_rms = np.asarray(struct_data["bass_rms"], dtype=np.float64)
-    other_rms = np.asarray(struct_data["other_rms"], dtype=np.float64)
-    vocals_rms = np.asarray(struct_data["vocals_rms"], dtype=np.float64)
-    total_rms = np.asarray(struct_data["rms"], dtype=np.float64)  # song-level RMS
+    bass_rms = np.asarray(struct_data.get("bass_rms", []), dtype=np.float64)
+    other_rms = np.asarray(struct_data.get("other_rms", []), dtype=np.float64)
+    vocals_rms = np.asarray(struct_data.get("vocals_rms", []), dtype=np.float64)
+    total_rms = np.asarray(struct_data.get("rms", []), dtype=np.float64)
 
-    L = min(len(drum_rms), len(bass_rms), len(other_rms), len(vocals_rms))
+    # Use drums length as canonical; others may be empty
+    L = drum_rms.size
     if L == 0:
         return [{"pauses": []}]
 
     fps = int(struct_data.get("fps", 43))
     segments = struct_data.get("segments", []) or []
+    boundary_margin_frames = int(round(boundary_margin_sec * fps))
+    guard_frames = int(round(interior_guard_sec * fps))
 
     def seg_idx(seg):
         s = max(0, int(round(seg["start"] * fps)))
@@ -405,10 +426,9 @@ def get_pauses(
         return s, e
 
     def quiet_runs(mask, base_idx=0):
-        # Returns [(start_abs, end_abs, length_frames), ...]
         if mask.size == 0:
             return []
-        padded = np.pad(mask.astype(np.int8), (1, 1), mode='constant', constant_values=0)
+        padded = np.pad(mask.astype(np.int8), (1, 1), mode="constant", constant_values=0)
         diffs = np.diff(padded)
         starts = np.where(diffs == 1)[0]
         ends = np.where(diffs == -1)[0]
@@ -419,7 +439,6 @@ def get_pauses(
         return out
 
     def choose_long_quiet(runs, fps_local, min_floor_sec, prominence_std):
-        # Accept runs clearly above average window time within this segment (or whole song for total_rms)
         if not runs:
             return []
         durs = np.array([r[2] for r in runs], dtype=np.float64)
@@ -432,6 +451,9 @@ def get_pauses(
             thr = max(int(round(mean + prominence_std * std)), min_floor)
         return [(s, e) for (s, e, d) in runs if d >= thr]
 
+    def overlaps(a_s, a_e, b_s, b_e):
+        return (a_s < b_e) and (a_e > b_s)
+
     pauses = []
 
     # Segment-wise processing
@@ -440,104 +462,115 @@ def get_pauses(
         if e_idx - s_idx <= 0:
             continue
 
-        # Segment averages and thresholds
-        d_avg = float(np.mean(drum_rms[s_idx:e_idx])) or 1e-12
-        b_avg = float(np.mean(bass_rms[s_idx:e_idx])) or 1e-12
-        o_avg = float(np.mean(other_rms[s_idx:e_idx])) or 1e-12
-        v_avg = float(np.mean(vocals_rms[s_idx:e_idx])) or 1e-12
+        drum_seg = drum_rms[s_idx:e_idx]
+        total_seg = total_rms[s_idx:e_idx] if total_rms.size >= e_idx else np.array([], dtype=np.float64)
 
-        thr_d = alpha * d_avg
-        thr_b = alpha * b_avg
-        thr_o = alpha * o_avg
-        thr_v = alpha * v_avg
+        # Drums thresholds per segment
+        d_avg = float(np.mean(drum_seg)) or 1e-12
+        thr_d = alpha_drums * d_avg
 
-        # Quiet masks within segment
-        mask_d = (drum_rms[s_idx:e_idx] < thr_d)
-        mask_b = (bass_rms[s_idx:e_idx] < thr_b)
-        mask_o = (other_rms[s_idx:e_idx] < thr_o)
-        mask_v = (vocals_rms[s_idx:e_idx] < thr_v)
+        # Drums quiet mask and activity
+        mask_d = (drum_seg < thr_d)
+        d_active = float(np.mean(~mask_d)) >= active_frac_min_drums
 
-        # Active in this segment?
-        d_active = float(np.mean(~mask_d)) >= active_frac_min
-        b_active = float(np.mean(~mask_b)) >= active_frac_min
-        o_active = float(np.mean(~mask_o)) >= active_frac_min
-        v_active = float(np.mean(~mask_v)) >= active_frac_min
+        # Additional gate: drums must be meaningfully present in the segment (ratio vs total)
+        if total_seg.size:
+            t_avg = float(np.mean(total_seg)) or 1e-12
+            drums_ratio_ok = (d_avg / max(t_avg, 1e-12)) >= float(drums_activity_ratio_min)
+        else:
+            drums_ratio_ok = d_avg >= 1e-12  # fallback
 
-        # Quiet runs and "clearly above average" selection
+        # Drums quiet runs and selection
         runs_d = quiet_runs(mask_d, base_idx=s_idx)
-        runs_b = quiet_runs(mask_b, base_idx=s_idx)
-        runs_o = quiet_runs(mask_o, base_idx=s_idx)
-        runs_v = quiet_runs(mask_v, base_idx=s_idx)
+        long_d = choose_long_quiet(runs_d, fps, run_min_floor_sec_drums, run_prominence_std_drums)
 
-        long_d = choose_long_quiet(runs_d, fps, run_min_floor_sec, run_prominence_std)
-        long_b = choose_long_quiet(runs_b, fps, run_min_floor_sec, run_prominence_std)
-        long_o = choose_long_quiet(runs_o, fps, run_min_floor_sec, run_prominence_std)
-        long_v = choose_long_quiet(runs_v, fps, run_min_floor_sec, run_prominence_std)
+        # Boundary regions (frames)
+        start_boundary_s = max(s_idx - boundary_margin_frames, s_idx)  # clamp to segment start
+        start_boundary_e = min(s_idx + boundary_margin_frames, e_idx)
+        end_boundary_s = max(e_idx - boundary_margin_frames, s_idx)
+        end_boundary_e = min(e_idx + boundary_margin_frames, e_idx)    # clamp to segment end
 
-        # Ruling:
-        # 1) If drums are active and there is a pause in drums, it is a pause.
+        # 1) Mid-segment pauses: ONLY drums quiet runs allowed, and only if drums are present before AND after the quiet run
+        if d_active and drums_ratio_ok and long_d:
+            # Use a higher activity threshold to confirm surrounding drum activity
+            thr_high = float(np.percentile(drum_seg, high_activity_percentile_drums)) if drum_seg.size else thr_d
+            for (ps, pe) in long_d:
+                interior = (ps >= start_boundary_e) and (pe <= end_boundary_s)
+                if not interior:
+                    continue
+
+                # Surrounding activity check (guard window on both sides)
+                before_s = max(s_idx, ps - guard_frames)
+                before_e = max(s_idx, ps)
+                after_s = min(e_idx, pe)
+                after_e = min(e_idx, pe + guard_frames)
+
+                before_active = (before_e > before_s) and bool(np.any(drum_rms[before_s:before_e] > thr_high))
+                after_active = (after_e > after_s) and bool(np.any(drum_rms[after_s:after_e] > thr_high))
+
+                if before_active and after_active:
+                    info = {"drums": True, "segment_index": seg_idx_i, "scale_ok": True}
+                    pauses.append((int(ps), int(pe), info))
+                # If drums are only active on one side (e.g., just at the end), do NOT mark interior pause
+
+        # 2) Boundary pauses: apply old logic near boundaries (drums-only mid, multi-stem permitted at boundaries)
         if d_active and long_d:
             for (ps, pe) in long_d:
-                info = {"drums": True, "bass": False, "other": False, "vocals": False, "segment_index": seg_idx_i, "scale_ok": True}
-                pauses.append((int(ps), int(pe), info))
-            continue
+                if overlaps(ps, pe, start_boundary_s, start_boundary_e) or overlaps(ps, pe, end_boundary_s, end_boundary_e):
+                    info = {"drums": True, "segment_index": seg_idx_i, "scale_ok": True}
+                    pauses.append((int(ps), int(pe), info))
 
-        # 2) If drums are NOT active, but vocals/bass/other are:
-        #    - If both bass and other are active, they both need to be paused (no overlap check). If both have any long quiet run,
-        #      include all of their long quiet windows as pauses.
-        #    - If there is only one instrument active among vocals/bass/other, that instrument alone being paused is enough.
+        # Non-drums near boundaries (instrument-specific tunables)
+        def stem_long_quiet(stem_rms, alpha_i, active_frac_min_i, run_min_floor_sec_i, run_prominence_std_i):
+            if stem_rms.size == 0:
+                return [], False
+            seg_slice = stem_rms[s_idx:e_idx]
+            avg = float(np.mean(seg_slice)) or 1e-12
+            thr = alpha_i * avg
+            mask = (seg_slice < thr)
+            active = float(np.mean(~mask)) >= active_frac_min_i
+            runs = quiet_runs(mask, base_idx=s_idx)
+            longs = choose_long_quiet(runs, fps, run_min_floor_sec_i, run_prominence_std_i)
+            return longs, active
+
+        longs_b, b_active = stem_long_quiet(bass_rms, alpha_bass, active_frac_min_bass, run_min_floor_sec_bass, run_prominence_std_bass)
+        longs_o, o_active = stem_long_quiet(other_rms, alpha_other, active_frac_min_other, run_min_floor_sec_other, run_prominence_std_other)
+        longs_v, v_active = stem_long_quiet(vocals_rms, alpha_vocals, active_frac_min_vocals, run_min_floor_sec_vocals, run_prominence_std_vocals)
+
         if not d_active:
             if b_active and o_active:
-                if long_b and long_o:
-                    for (ps, pe) in long_b:
+                for (ps, pe) in longs_b:
+                    if overlaps(ps, pe, start_boundary_s, start_boundary_e) or overlaps(ps, pe, end_boundary_s, end_boundary_e):
                         info = {"drums": False, "bass": True, "other": False, "vocals": False, "segment_index": seg_idx_i, "scale_ok": True}
                         pauses.append((int(ps), int(pe), info))
-                    for (ps, pe) in long_o:
+                for (ps, pe) in longs_o:
+                    if overlaps(ps, pe, start_boundary_s, start_boundary_e) or overlaps(ps, pe, end_boundary_s, end_boundary_e):
                         info = {"drums": False, "bass": False, "other": True, "vocals": False, "segment_index": seg_idx_i, "scale_ok": True}
                         pauses.append((int(ps), int(pe), info))
             else:
-                active_list = [("bass", b_active, long_b), ("other", o_active, long_o), ("vocals", v_active, long_v)]
+                active_list = [("bass", b_active, longs_b), ("other", o_active, longs_o), ("vocals", v_active, longs_v)]
                 only_one_active = [name for name, act, _ in active_list if act]
                 if len(only_one_active) == 1:
                     name = only_one_active[0]
-                    longs = dict(bass=long_b, other=long_o, vocals=long_v)[name]
+                    longs = dict(bass=longs_b, other=longs_o, vocals=longs_v)[name]
                     for (ps, pe) in longs:
-                        info = {
-                            "drums": False,
-                            "bass": (name == "bass"),
-                            "other": (name == "other"),
-                            "vocals": (name == "vocals"),
-                            "segment_index": seg_idx_i,
-                            "scale_ok": True,
-                        }
-                        pauses.append((int(ps), int(pe), info))
-
-    # Song-level total RMS quiet windows: rms < alpha * average(total_rms) across the whole song
-    if total_rms.size:
-        song_avg = float(np.mean(total_rms)) or 1e-12
-        thr_total = alpha * song_avg
-        mask_total = (total_rms < thr_total)
-        runs_total = quiet_runs(mask_total, base_idx=0)
-        long_total = choose_long_quiet(runs_total, fps, run_min_floor_sec, run_prominence_std)
-        for (ps, pe) in long_total:
-            info = {
-                "drums": False,
-                "bass": False,
-                "other": False,
-                "vocals": False,
-                "mix": True,
-                "segment_index": -1,  # song-level
-                "scale_ok": True,
-            }
-            pauses.append((int(ps), int(pe), info))
+                        if overlaps(ps, pe, start_boundary_s, start_boundary_e) or overlaps(ps, pe, end_boundary_s, end_boundary_e):
+                            info = {
+                                "drums": False,
+                                "bass": (name == "bass"),
+                                "other": (name == "other"),
+                                "vocals": (name == "vocals"),
+                                "segment_index": seg_idx_i,
+                                "scale_ok": True,
+                            }
+                            pauses.append((int(ps), int(pe), info))
 
     # Merge overlapping/adjacent pauses (within 0.15s)
     merged_pauses = []
     merge_gap_frames = int(round(0.15 * fps))
     for (s, e, info) in sorted(pauses, key=lambda x: (x[0], x[1])):
         if not merged_pauses:
-            merged_pauses.append([s, e, info])
-            continue
+            merged_pauses.append([s, e, info]); continue
         ps, pe, pinfo = merged_pauses[-1]
         if s <= pe + merge_gap_frames:
             merged_pauses[-1][1] = max(pe, e)

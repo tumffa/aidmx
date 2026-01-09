@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from src.services.audio_analysis import drum_analysis_beats
 
 def calculate_light_strength_envelope(song_data, struct_data):
@@ -29,17 +30,10 @@ def calculate_light_strength_envelope(song_data, struct_data):
 
     # Second pass: build envelopes per segment with neighbor-aware smooth transitions
     for i, segment in enumerate(segments):
-        light_envelope = calculate_drums_envelope(segment)
-        refined = refine_envelope_with_pauses(
-            envelope=light_envelope,
-            segment=segment,
-            pauses=pauses,
-            fps=fps,
-            total_frames=total_frames
-        )
-        segment.setdefault("drum_analysis", {})
-        segment["drum_analysis"]["light_strength_envelope"] = refined
+        # 1) Beat/drums envelope (raw)
+        beat_raw = calculate_drums_envelope(segment)
 
+        # 2) Flow envelope (raw)
         seg_windows = all_flow_windows[i]
         prev_tail_score = None
         next_head_score = None
@@ -48,7 +42,7 @@ def calculate_light_strength_envelope(song_data, struct_data):
         if i + 1 < len(all_flow_windows) and all_flow_windows[i + 1]:
             next_head_score = all_flow_windows[i + 1][0].get("score", None)
 
-        flow_envelope = build_flow_envelope(
+        flow_raw = build_flow_envelope(
             struct_data=struct_data,
             segment=segment,
             flow_windows=seg_windows,
@@ -59,93 +53,35 @@ def calculate_light_strength_envelope(song_data, struct_data):
             prev_tail_score=prev_tail_score,
             next_head_score=next_head_score
         )
-        segment["flow_windows"] = seg_windows
-        segment["flow_envelope"] = flow_envelope
 
-        # Apply flow envelope to gaps outside active ranges that are >= 4 seconds
-        try:
-            gap_min_sec = 4.0
-            seg_start_abs = float(segment.get("start", 0.0))
-            seg_end_abs = float(segment.get("end", seg_start_abs))
-            seg_dur = max(0.0, seg_end_abs - seg_start_abs)
+        # 3) Refine both envelopes with pauses independently
+        beat_refined = refine_envelope_with_pauses(
+            envelope=beat_raw,
+            segment=segment,
+            pauses=pauses,
+            fps=fps,
+            total_frames=total_frames
+        )
 
-            ref_times = np.asarray(refined.get("times", []), dtype=np.float64)  # relative to seg start
-            ref_vals = np.asarray(refined.get("values", []), dtype=np.float64)
+        flow_refined = refine_envelope_with_pauses(
+            envelope=flow_raw,
+            segment=segment,
+            pauses=pauses,
+            fps=fps,
+            total_frames=total_frames
+        )
 
-            # Build union of active ranges from refined envelope (segment-relative seconds)
-            active_ranges = sorted(
-                [(float(r.get("start_ms", 0)) / 1000.0, float(r.get("end_ms", 0)) / 1000.0)
-                 for r in (refined.get("active_ranges") or [])],
-                key=lambda x: x[0]
-            )
+        # 4) Store both envelopes side-by-side (no fusion)
+        segment.setdefault("drum_analysis", {})
+        segment["drum_analysis"]["light_strength_envelope"] = {
+            "beat": beat_refined,
+            "flow": flow_refined,
+        }
+        # Build beat_flow_ranges (beat-priority, fill ≥4s gaps with flow)
+        add_beat_flow_ranges(segment["drum_analysis"]["light_strength_envelope"], min_gap_sec=4.0)
 
-            # Compute gaps outside active ranges
-            gaps = []
-            prev_end = 0.0
-            for (rs, re) in active_ranges:
-                rs = max(0.0, min(seg_dur, rs))
-                re = max(0.0, min(seg_dur, re))
-                if rs - prev_end >= gap_min_sec:
-                    gaps.append((prev_end, rs))
-                prev_end = max(prev_end, re)
-            if seg_dur - prev_end >= gap_min_sec:
-                gaps.append((prev_end, seg_dur))
-
-            # Overlay flow envelope on those gaps
-            fe_times = np.asarray(flow_envelope.get("times", []), dtype=np.float64)
-            fe_vals = np.asarray(flow_envelope.get("values", []), dtype=np.float64)
-            new_flow_ranges_ms = []
-            if ref_times.size and ref_vals.size and fe_times.size and fe_vals.size and gaps:
-                fe_interp = np.interp(
-                    ref_times,
-                    fe_times,
-                    fe_vals,
-                    left=fe_vals[0],
-                    right=fe_vals[-1]
-                )
-                mask = np.zeros_like(ref_times, dtype=bool)
-                for gs, ge in gaps:
-                    mask |= (ref_times >= gs) & (ref_times <= ge)
-
-                # Do not overlay where pauses already zeroed the envelope
-                paused_zero_mask = ref_vals <= 1e-9
-                mask &= ~paused_zero_mask
-
-                # Record gap ranges (unchanged)
-                new_flow_ranges_ms = []
-                for gs, ge in gaps:
-                    s_ms = int(np.ceil(gs * 1000.0))
-                    e_ms = int(np.floor(ge * 1000.0))
-                    if e_ms > s_ms:
-                        new_flow_ranges_ms.append((s_ms, e_ms))
-
-                ref_vals[mask] = np.maximum(ref_vals[mask], fe_interp[mask])
-                refined["values"] = ref_vals.tolist()
-
-            # Merge new flow-applied ranges into active_ranges
-            if new_flow_ranges_ms:
-                def merge_ranges_ms(ranges_ms):
-                    rng = [(int(s), int(e)) for s, e in ranges_ms if int(e) > int(s)]
-                    if not rng:
-                        return []
-                    rng.sort(key=lambda x: x[0])
-                    merged = [rng[0]]
-                    for s, e in rng[1:]:
-                        ps, pe = merged[-1]
-                        if s <= pe:
-                            merged[-1] = (ps, max(pe, e))
-                        else:
-                            merged.append((s, e))
-                    return [{"start_ms": s, "end_ms": e} for s, e in merged]
-
-                existing_ms = [(int(r.get("start_ms", 0)), int(r.get("end_ms", 0))) for r in (refined.get("active_ranges") or [])]
-                refined["active_ranges"] = merge_ranges_ms(existing_ms + new_flow_ranges_ms)
-
-            # Store back the updated refined envelope
-            segment["drum_analysis"]["light_strength_envelope"] = refined
-        
-        except Exception as e:
-            print(f"[flow-overlay] Warning: could not apply flow envelope to gaps in segment {i}: {e}")
+        # Optional plot: show beat as primary and overlay flow
+        plot_light_envelope(beat_refined, flow_refined)
 
     return [{"segments": segments}]
 
@@ -226,7 +162,6 @@ def calculate_drums_envelope(segment,
             
             # Calculate fade-out time with min/max bounds, but never beyond next hit
             time_to_next = next_hit_time - time
-            # ...existing code...
             if time_to_next >= min_snare_fadeout:
                 fadeout_time = min(time_to_next, max_snare_fadeout)
             else:
@@ -244,7 +179,6 @@ def calculate_drums_envelope(segment,
                     next_hit_time = hit_time
 
             time_to_next = next_hit_time - time
-            # ...existing code...
             if time_to_next >= min_kick_fadeout:
                 fadeout_time = min(time_to_next, max_kick_fadeout)
             else:
@@ -339,7 +273,7 @@ def calculate_drums_envelope(segment,
 
     for i, (time, value) in enumerate(zip(envelope_times, envelope_values)):
         # Detect transition into active range
-        if value > 0.2 and not in_active_range:
+        if value > 0.1 and not in_active_range:
             in_active_range = True
             range_start = time
 
@@ -376,36 +310,50 @@ def calculate_drums_envelope(segment,
         "active_ranges": active_ranges
     }
 
-def refine_envelope_with_pauses(envelope, segment, pauses, fps=43, total_frames=None, require_flags=False):
+def refine_envelope_with_pauses(envelope, segment, pauses, fps=43, total_frames=None):
     times_rel = np.asarray(envelope["times"], dtype=np.float64)
     values = np.asarray(envelope["values"], dtype=np.float64)
-    seg_start_abs = float(envelope.get("segment_start", segment.get("start", 0.0)))
-    seg_end_abs = float(envelope.get("segment_end", segment.get("end", seg_start_abs)))
 
-    # Absolute time grid for this segment
-    times_abs = seg_start_abs + times_rel
+    # Align lengths defensively to avoid index errors
+    if times_rel.size != values.size:
+        n = int(min(times_rel.size, values.size))
+        times_rel = times_rel[:n]
+        values = values[:n]
+
+    if times_rel.size == 0 or values.size == 0:
+        return {
+            "times": [],
+            "values": [],
+            "segment_start": envelope.get("segment_start", segment.get("start", 0.0)),
+            "segment_end": envelope.get("segment_end", segment.get("end", 0.0)),
+            "active_ranges": [],
+        }
+
+    seg_start = float(envelope.get("segment_start", segment.get("start", 0.0)))
+    times_abs = seg_start + times_rel
     scale = np.ones_like(times_abs, dtype=np.float64)
+
+    boundary_secs = 1.5
+    seg_start_abs = float(segment.get("start", 0.0))
+    seg_end_abs = float(segment.get("end", seg_start_abs))
 
     # Detect envelope peaks once (local maxima); threshold defines a "meaningful" peak
     peak_threshold = 0.2
     if values.size >= 3:
         peak_idx = np.where((values[1:-1] > values[:-2]) & (values[1:-1] >= values[2:]))[0] + 1
-        peak_times = times_abs[peak_idx]
-        peak_vals = values[peak_idx]
     else:
         peak_idx = np.array([], dtype=int)
-        peak_times = np.array([], dtype=np.float64)
-        peak_vals = np.array([], dtype=np.float64)
+    peak_times = times_abs[peak_idx] if peak_idx.size else np.array([], dtype=np.float64)
+    peak_vals = values[peak_idx] if peak_idx.size else np.array([], dtype=np.float64)
 
-    # Build accepted pauses overlapping the segment
+    # Filter pauses: skip any pause that contains a peak above threshold
     accepted_pauses = []
     for p in (pauses or []):
         start_f, end_f = int(p[0]), int(p[1])
         info = p[2] if (isinstance(p, (list, tuple)) and len(p) >= 3) else {}
-        drums_quiet = bool(info.get("drums", True))  # default True if missing
-        scale_ok = bool(info.get("scale_ok", True))  # default True if missing
-
-        if require_flags and not (drums_quiet and scale_ok):
+        drums_quiet = bool(info.get("drums", False))
+        scale_ok = bool(info.get("scale_ok", False))
+        if not (drums_quiet and scale_ok):
             continue
 
         ps = float(start_f) / fps
@@ -413,65 +361,41 @@ def refine_envelope_with_pauses(envelope, segment, pauses, fps=43, total_frames=
         if pe <= ps:
             continue
 
-        # Overlap with the current segment
-        s_abs = max(ps, seg_start_abs)
-        e_abs = min(pe, seg_end_abs)
-        if e_abs <= s_abs:
-            continue
-
-        # Skip pauses that contain a strong peak (optional gating)
         if peak_idx.size:
-            has_peak = np.any((peak_times >= s_abs) & (peak_times <= e_abs) & (peak_vals > peak_threshold))
+            has_peak = np.any((peak_times >= ps) & (peak_times <= pe) & (peak_vals > peak_threshold))
             if has_peak:
                 continue
 
-        accepted_pauses.append((s_abs, e_abs))
+        accepted_pauses.append(p)
 
-    # Apply scaling from accepted pauses: ramp-in to 0, hold at 0, optional ramp-out for smoothness
-    boundary_secs = 1.5
-    for (s_abs, e_abs) in accepted_pauses:
-        is_boundary_sensitive = (
-            (s_abs <= seg_start_abs <= e_abs) or
-            (s_abs <= seg_end_abs <= e_abs) or
-            (e_abs >= seg_start_abs - boundary_secs and s_abs <= seg_start_abs + boundary_secs) or
-            (e_abs >= seg_end_abs - boundary_secs and s_abs <= seg_end_abs + boundary_secs)
-        )
+    # Apply scaling only from accepted pauses
+    for p in accepted_pauses:
+        start_f, end_f = int(p[0]), int(p[1])
+        ps = float(start_f) / fps
+        pe = float(end_f) / fps
 
-        dur = max(e_abs - s_abs, 1e-6)
+        crosses_start = (ps <= seg_start_abs <= pe)
+        crosses_end = (ps <= seg_end_abs <= pe)
+        near_start = (pe >= seg_start_abs - boundary_secs) and (ps <= seg_start_abs + boundary_secs)
+        near_end = (pe >= seg_end_abs - boundary_secs) and (ps <= seg_end_abs + boundary_secs)
+        is_boundary_sensitive = crosses_start or crosses_end or near_start or near_end
+
         ramp_ratio = 0.12 if is_boundary_sensitive else 0.33
-        ramp_len = max(dur * ramp_ratio, 0.05)  # at least 50 ms
-        ramp_in_end = min(s_abs + ramp_len, e_abs)
-        ramp_out_end = min(e_abs + ramp_len, seg_end_abs)
+        ramp_end = ps + (pe - ps) * ramp_ratio
+        ramp_end = min(ramp_end, pe)
 
-        # Index masks
-        idx_in_ramp = np.where((times_abs >= s_abs) & (times_abs <= ramp_in_end))[0]
-        idx_hold = np.where((times_abs > ramp_in_end) & (times_abs <= e_abs))[0]
-        idx_out_ramp = np.where((times_abs > e_abs) & (times_abs <= ramp_out_end))[0]
+        in_ramp = (times_abs >= ps) & (times_abs <= ramp_end)
+        if in_ramp.any():
+            prog = (times_abs[in_ramp] - ps) / max(ramp_end - ps, 1e-12)
+            cand = (1.0 - prog) ** 2.5 if is_boundary_sensitive else np.cos(0.5 * np.pi * prog)
+            scale[in_ramp] = np.minimum(scale[in_ramp], cand)
 
-        # If no hold portion exists (very short pause), force full pause span to 0
-        if idx_hold.size == 0:
-            idx_pause_full = np.where((times_abs >= s_abs) & (times_abs <= e_abs))[0]
-            if idx_pause_full.size:
-                scale[idx_pause_full] = 0.0
-        else:
-            # Ramp-in (1 -> down), smoother on boundaries
-            if idx_in_ramp.size:
-                prog = (times_abs[idx_in_ramp] - s_abs) / max(ramp_in_end - s_abs, 1e-12)
-                cand = (1.0 - prog) ** 2.5 if is_boundary_sensitive else 0.5 * (1.0 + np.cos(np.pi * prog))
-                scale[idx_in_ramp] = np.minimum(scale[idx_in_ramp], cand)
-
-            # Hold (force to 0)
-            scale[idx_hold] = 0.0
-
-            # Optional ramp-out (0 -> 1) to avoid sharp edges after pause
-            if idx_out_ramp.size:
-                prog = (times_abs[idx_out_ramp] - e_abs) / max(ramp_out_end - e_abs, 1e-12)
-                cand = 0.5 * (1.0 - np.cos(np.pi * prog))
-                scale[idx_out_ramp] = np.minimum(scale[idx_out_ramp], cand)
+        in_hold = (times_abs > ramp_end) & (times_abs <= pe)
+        if in_hold.any():
+            scale[in_hold] = 0.0
 
     refined_values = values * scale
 
-    # Merge active ranges (existing + accepted pauses)
     def merge_ranges(ranges_ms):
         rng = [(int(s), int(e)) for s, e in ranges_ms if int(e) > int(s)]
         if not rng:
@@ -489,22 +413,27 @@ def refine_envelope_with_pauses(envelope, segment, pauses, fps=43, total_frames=
     existing_ranges = envelope.get("active_ranges", []) or []
     base_ranges_ms = [(int(r.get("start_ms", 0)), int(r.get("end_ms", 0))) for r in existing_ranges if r is not None]
 
+    # Accepted pauses -> active ranges (segment-local), gated by drums_quiet AND scale_ok, and excluding peaks
     pause_ranges_ms = []
-    for (s_abs, e_abs) in accepted_pauses:
-        # Use floor for start and ceil for end to avoid collapsing tiny pauses
-        s_ms = int(np.floor((s_abs - seg_start_abs) * 1000.0))
-        e_ms = int(np.ceil((e_abs - seg_start_abs) * 1000.0))
-        if e_ms <= s_ms:
-            e_ms = s_ms + 1  # ensure non-zero width
-        pause_ranges_ms.append((s_ms, e_ms))
+    for p in accepted_pauses:
+        start_f, end_f = int(p[0]), int(p[1])
+        ps = float(start_f) / fps
+        pe = float(end_f) / fps
+        s_abs = max(ps, seg_start_abs)
+        e_abs = min(pe, seg_end_abs)
+        if e_abs > s_abs:
+            s_ms = int(np.ceil((s_abs - seg_start_abs) * 1000.0))
+            e_ms = int(np.floor((e_abs - seg_start_abs) * 1000.0))
+            if e_ms > s_ms:
+                pause_ranges_ms.append((s_ms, e_ms))
 
     active_ranges = merge_ranges(base_ranges_ms + pause_ranges_ms)
 
     return {
-        "times": envelope["times"],
+        "times": times_rel.tolist(),  # return aligned times
         "values": refined_values.tolist(),
-        "segment_start": seg_start_abs,
-        "segment_end": seg_end_abs,
+        "segment_start": envelope.get("segment_start", segment.get("start", 0.0)),
+        "segment_end": envelope.get("segment_end", segment.get("end", 0.0)),
         "active_ranges": active_ranges,
     }
 
@@ -670,17 +599,24 @@ def build_flow_envelope(
 
     fps = int(struct_data.get("fps", 43))
     if not segment:
-        return {"times": [], "values": []}
+        return {"times": [], "values": [], "segment_start": 0.0, "segment_end": 0.0, "active_ranges": []}
 
     seg_start_abs = float(segment.get("start", 0.0))
     seg_end_abs = float(segment.get("end", seg_start_abs))
     if seg_end_abs <= seg_start_abs:
-        return {"times": [], "values": []}
+        return {"times": [], "values": [], "segment_start": seg_start_abs, "segment_end": seg_end_abs, "active_ranges": []}
 
     # No windows: return baseline for the segment
     if not flow_windows:
         times_abs = np.arange(seg_start_abs, seg_end_abs + 1e-9, resolution_ms / 1000.0, dtype=np.float64)
-        return {"times": (times_abs - seg_start_abs).tolist(), "values": [baseline] * len(times_abs)}
+        times_rel = (times_abs - seg_start_abs).tolist()
+        return {
+            "times": times_rel,
+            "values": [baseline] * len(times_abs),
+            "segment_start": seg_start_abs,
+            "segment_end": seg_end_abs,
+            "active_ranges": []
+        }
 
     # Prepare instruments RMS series
     stems = {
@@ -691,7 +627,14 @@ def build_flow_envelope(
     L = min(len(stems["bass"]), len(stems["other"]), len(stems["vocals"])) if all(len(v) for v in stems.values()) else 0
     if L == 0:
         times_abs = np.arange(seg_start_abs, seg_end_abs + 1e-9, resolution_ms / 1000.0, dtype=np.float64)
-        return {"times": (times_abs - seg_start_abs).tolist(), "values": [baseline] * len(times_abs)}
+        times_rel = (times_abs - seg_start_abs).tolist()
+        return {
+            "times": times_rel,
+            "values": [baseline] * len(times_abs),
+            "segment_start": seg_start_abs,
+            "segment_end": seg_end_abs,
+            "active_ranges": []
+        }
 
     # Sampling grid within the segment (absolute), output will be relative
     resolution_sec = resolution_ms / 1000.0
@@ -814,28 +757,148 @@ def build_flow_envelope(
         values = np.convolve(values, kernel2, mode="same")
     values = np.power(np.clip(values, 0.0, 1.0), float(peak_compress_gamma))
 
-    return {"times": (times_abs - seg_start_abs).tolist(), "values": values.tolist()}
+    # Compute relative times
+    times_rel = (times_abs - seg_start_abs).tolist()
+    envelope_values = values.tolist()
+
+    # Active ranges detection (same style as beat envelope)
+    active_ranges = []
+    in_active_range = False
+    range_start_abs = None
+    # Use the same entry threshold (0.1); exit at baseline
+    entry_thresh = max(0.1, baseline + 1e-9)
+
+    for i, (t_abs, val) in enumerate(zip(times_abs, values)):
+        if (val > entry_thresh) and not in_active_range:
+            in_active_range = True
+            range_start_abs = t_abs
+        elif in_active_range and (val <= baseline + 0.001 or i == len(values) - 1):
+            in_active_range = False
+            range_end_abs = t_abs
+
+            start_idx = int(np.searchsorted(times_abs, range_start_abs, side="left"))
+            end_idx = int(np.searchsorted(times_abs, range_end_abs, side="left"))
+            end_idx = min(end_idx + 1, len(values))
+            if start_idx < end_idx:
+                max_val = float(values[start_idx:end_idx].max())
+            else:
+                max_val = float(values[start_idx])
+
+            active_ranges.append({
+                "start_ms": int((range_start_abs - seg_start_abs) * 1000),
+                "end_ms": int((range_end_abs - seg_start_abs) * 1000),
+                "duration_ms": int((range_end_abs - range_start_abs) * 1000),
+                "max_value": max_val
+            })
+
+    return {
+        "times": times_rel,
+        "values": envelope_values,
+        "segment_start": seg_start_abs,
+        "segment_end": seg_end_abs,
+        "active_ranges": active_ranges
+    }
+
+def add_beat_flow_ranges(light_env_dict, min_gap_sec=4.0):
+    """
+    Adds 'beat_flow_ranges' to the light strength envelope container.
+    Output is a list of (start_ms, end_ms, source) tuples:
+      - source = 0 for beat active ranges
+      - source = 1 for flow active ranges
+    Behavior:
+      1) Append all beat active ranges first (priority).
+      2) For each gap >= min_gap_sec between consecutive beat ranges,
+         append any overlapping flow active ranges clipped to that gap.
+    """
+    if not isinstance(light_env_dict, dict):
+        return light_env_dict
+
+    beat_env = light_env_dict.get("beat") or {}
+    flow_env = light_env_dict.get("flow") or {}
+    beat_ranges = beat_env.get("active_ranges") or []
+    flow_ranges = flow_env.get("active_ranges") or []
+
+    def to_pairs(ranges):
+        out = []
+        for r in ranges:
+            try:
+                s = int(r.get("start_ms", 0))
+                e = int(r.get("end_ms", 0))
+            except Exception:
+                continue
+            if e > s:
+                out.append((s, e))
+        out.sort(key=lambda x: x[0])
+        return out
+
+    beat_pairs = to_pairs(beat_ranges)
+    flow_pairs = to_pairs(flow_ranges)
+
+    result = []
+    # 1) Append beat ranges with source=0
+    for s, e in beat_pairs:
+        result.append((s, e, 0))
+
+    # 2) Fill only gaps >= min_gap_sec with flow ranges (source=1)
+    if len(beat_pairs) >= 2 and flow_pairs:
+        min_gap_ms = int(round(min_gap_sec * 1000))
+        for i in range(len(beat_pairs) - 1):
+            gap_start = beat_pairs[i][1]
+            gap_end = beat_pairs[i + 1][0]
+            if gap_end - gap_start >= min_gap_ms:
+                for fs, fe in flow_pairs:
+                    if fe <= gap_start or fs >= gap_end:
+                        continue
+                    s = max(fs, gap_start)
+                    e = min(fe, gap_end)
+                    if e > s:
+                        result.append((s, e, 1))
+
+    light_env_dict["beat_flow_ranges"] = result
+    return light_env_dict
 
 def plot_light_envelope(envelope, flow_envelope=None, segment_title=None, show=True, save_path=None):
-    import matplotlib.pyplot as plt
-    import numpy as np
+    """
+    Accepts either:
+    - New container: envelope = {"beat": {...}, "flow": {...}}
+    - Legacy: envelope = beat envelope dict, flow_envelope passed separately
+    """
+    # Resolve beat and flow envelopes from inputs
+    if isinstance(envelope, dict) and ("beat" in envelope or "flow" in envelope):
+        beat_env = envelope.get("beat")
+        flow_env = envelope.get("flow") if flow_envelope is None else flow_envelope
+    else:
+        beat_env = envelope
+        flow_env = flow_envelope
 
-    times = np.asarray(envelope.get("times", []), dtype=np.float64)
-    vals = np.asarray(envelope.get("values", []), dtype=np.float64)
+    # Plot beat/drum envelope (primary)
+    times = np.asarray((beat_env or {}).get("times", []), dtype=np.float64)
+    vals = np.asarray((beat_env or {}).get("values", []), dtype=np.float64)
 
     fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(times, vals, label="Drum+Pause envelope", color="#1f77b4")
+    if times.size and vals.size:
+        ax.plot(times, vals, label="Beat envelope", color="#1f77b4", zorder=3)
+    else:
+        ax.plot([], [], label="Beat envelope", color="#1f77b4", zorder=3)
 
-    if flow_envelope:
-        ft = np.asarray(flow_envelope.get("times", []), dtype=np.float64)
-        fv = np.asarray(flow_envelope.get("values", []), dtype=np.float64)
-        ax.plot(ft, fv, label="Flow envelope", color="#ff7f0e", alpha=0.7)
+    # Overlay flow envelope if present
+    if flow_env:
+        ft = np.asarray(flow_env.get("times", []), dtype=np.float64)
+        fv = np.asarray(flow_env.get("values", []), dtype=np.float64)
+        if ft.size and fv.size:
+            ax.plot(ft, fv, label="Flow envelope", color="#ff7f0e", alpha=0.8, zorder=3)
 
-    # Shade active ranges (segment-relative seconds)
-    for i, r in enumerate(envelope.get("active_ranges", []) or []):
+    # Shade beat active ranges (segment-relative seconds)
+    for i, r in enumerate((beat_env or {}).get("active_ranges", []) or []):
         s = float(r.get("start_ms", 0)) / 1000.0
         e = float(r.get("end_ms", 0)) / 1000.0
-        ax.axvspan(s, e, color="green", alpha=0.12, label="Active ranges" if i == 0 else None)
+        ax.axvspan(s, e, color="#1f77b4", alpha=0.12, zorder=1, label="Beat active ranges" if i == 0 else None)
+
+    # Shade flow active ranges (segment-relative seconds)
+    for i, r in enumerate((flow_env or {}).get("active_ranges", []) or []):
+        s = float(r.get("start_ms", 0)) / 1000.0
+        e = float(r.get("end_ms", 0)) / 1000.0
+        ax.axvspan(s, e, color="#ff7f0e", alpha=0.10, zorder=1, label="Flow active ranges" if i == 0 else None)
 
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Intensity")
