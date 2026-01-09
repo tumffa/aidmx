@@ -80,9 +80,6 @@ def calculate_light_strength_envelope(song_data, struct_data):
         # Build beat_flow_ranges (beat-priority, fill ≥4s gaps with flow)
         add_beat_flow_ranges(segment["drum_analysis"]["light_strength_envelope"], min_gap_sec=4.0)
 
-        # Optional plot: show beat as primary and overlay flow
-        plot_light_envelope(beat_refined, flow_refined)
-
     return [{"segments": segments}]
 
 def calculate_drums_envelope(segment, 
@@ -808,6 +805,7 @@ def add_beat_flow_ranges(light_env_dict, min_gap_sec=4.0):
     Behavior:
       1) Append all beat active ranges first (priority).
       2) For each gap >= min_gap_sec between consecutive beat ranges,
+         and also leading/trailing gaps in the segment timeline,
          append any overlapping flow active ranges clipped to that gap.
     """
     if not isinstance(light_env_dict, dict):
@@ -834,26 +832,52 @@ def add_beat_flow_ranges(light_env_dict, min_gap_sec=4.0):
     beat_pairs = to_pairs(beat_ranges)
     flow_pairs = to_pairs(flow_ranges)
 
-    result = []
+    # Determine segment-relative timeline end (ms). Prefer beat times; fallback to flow.
+    def timeline_end_ms(env):
+        t = env.get("times") or []
+        try:
+            return int(round(float(t[-1]) * 1000.0)) if t else 0
+        except Exception:
+            return 0
+
+    end_ms = max(timeline_end_ms(beat_env), timeline_end_ms(flow_env))
+    min_gap_ms = int(round(min_gap_sec * 1000))
+
     # 1) Append beat ranges with source=0
-    for s, e in beat_pairs:
-        result.append((s, e, 0))
+    result = [(s, e, 0) for (s, e) in beat_pairs]
 
-    # 2) Fill only gaps >= min_gap_sec with flow ranges (source=1)
-    if len(beat_pairs) >= 2 and flow_pairs:
-        min_gap_ms = int(round(min_gap_sec * 1000))
-        for i in range(len(beat_pairs) - 1):
-            gap_start = beat_pairs[i][1]
-            gap_end = beat_pairs[i + 1][0]
-            if gap_end - gap_start >= min_gap_ms:
-                for fs, fe in flow_pairs:
-                    if fe <= gap_start or fs >= gap_end:
-                        continue
-                    s = max(fs, gap_start)
-                    e = min(fe, gap_end)
-                    if e > s:
-                        result.append((s, e, 1))
+    # 2) Compute gaps (leading, in-between, trailing)
+    gaps = []
+    if end_ms > 0:
+        if not beat_pairs:
+            # No beat ranges: a single full-segment gap
+            gaps.append((0, end_ms))
+        else:
+            # Leading
+            if beat_pairs[0][0] > 0:
+                gaps.append((0, beat_pairs[0][0]))
+            # In-between
+            for i in range(len(beat_pairs) - 1):
+                gaps.append((beat_pairs[i][1], beat_pairs[i + 1][0]))
+            # Trailing
+            if beat_pairs[-1][1] < end_ms:
+                gaps.append((beat_pairs[-1][1], end_ms))
 
+    # 3) For each large-enough gap, clip/add any overlapping flow ranges
+    if flow_pairs and gaps:
+        for gs, ge in gaps:
+            if ge - gs < min_gap_ms:
+                continue
+            for fs, fe in flow_pairs:
+                if fe <= gs or fs >= ge:
+                    continue
+                s = max(fs, gs)
+                e = min(fe, ge)
+                if e > s:
+                    result.append((s, e, 1))
+
+    # Sort final list
+    result.sort(key=lambda x: (x[0], x[1], x[2]))
     light_env_dict["beat_flow_ranges"] = result
     return light_env_dict
 

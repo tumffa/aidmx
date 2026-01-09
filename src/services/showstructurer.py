@@ -1452,7 +1452,7 @@ class ShowStructurer:
             end_time = segments[i]["end"]*1000
             length = (segments[i]["end"] - segments[i]["start"])*1000
             queues = []
-            if segments[i]["is_chorus_section"] and 0 == 1:
+            if segments[i]["is_chorus_section"]:
                 # Use the single primary chaser for all energetic segments
                 current_chaser = primary_chaser
                 is_focus_segment = segments[i]["label"] == show.struct["focus"]["first"]
@@ -1490,7 +1490,7 @@ class ShowStructurer:
                 end_time=end_time,
                 strobe_ranges=strobe_ranges,
             )
-            light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]["beat"]
+            light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]
             segment_dimmers = self.scale_dimmer_with_envelope(segment_dimmers, light_strength_envelope)
 
             # OLA scripts
@@ -1517,44 +1517,58 @@ class ShowStructurer:
     
     def scale_dimmer_with_envelope(self, segment_dimmers, light_strength_envelope):
         """
-        Scale dimmer values in a segment_dimmers script using a light strength envelope.
+        Scale dimmer values using beat_flow_ranges:
+          - When inside a beat_flow range with source 0, use the beat envelope.
+          - When inside a beat_flow range with source 1, use the flow envelope.
+          - Outside any beat_flow range, do not scale.
 
-        segment_dimmers format (OLA mode):
-            [wait_ms, (fixture_id, channel, value), (fixture_id, channel, value), ..., wait_ms, ...]
-
-        Timing rule (SEGMENT-LOCAL envelope):
-          - The first wait is the start offset relative to song beginning.
-            It MUST be preserved, but MUST NOT be included in the envelope time.
-          - Envelope time starts at t=0 right after the first wait.
-          - We continuously apply scaling inside envelope active ranges by re-emitting
-            scaled dimmer values at a fixed update frequency (self.dimmer_update_fq).
-
-        Scaling rule:
-          - Only scale when current seg time is inside light_strength_envelope["active_ranges"].
-          - Scaling uses the latest *unscaled* value last set by the original script.
+        light_strength_envelope: container dict with keys:
+          {"beat": {...}, "flow": {...}, "beat_flow_ranges": [(start_ms, end_ms, source), ...]}
         """
         if not segment_dimmers:
             return segment_dimmers
 
-        envelope_fn = self._light_strength_envelope_function(light_strength_envelope)
-        active_ranges = (light_strength_envelope or {}).get("active_ranges", []) or []
-        ranges = sorted(
-            [
-                {
-                    "start_ms": int(r.get("start_ms", 0)),
-                    "end_ms": int(r.get("end_ms", 0)),
-                }
-                for r in active_ranges
-                if r is not None
-            ],
-            key=lambda r: r["start_ms"],
-        )
+        env_container = light_strength_envelope or {}
+        beat_env = (env_container.get("beat") or {})
+        flow_env = (env_container.get("flow") or {})
+
+        # Build interpolation fns
+        beat_fn = self._light_strength_envelope_function(beat_env) if beat_env else (lambda t: 1.0)
+        flow_fn = self._light_strength_envelope_function(flow_env) if flow_env else (lambda t: 1.0)
+
+        # Prefer beat_flow_ranges; fallback to beat active_ranges (source=0) if absent
+        beat_flow_ranges = env_container.get("beat_flow_ranges") or []
+
+        def _coerce_pairs_with_source(ranges_like):
+            out = []
+            for r in ranges_like:
+                try:
+                    # beat_flow_ranges entries are tuples: (start_ms, end_ms, source)
+                    if isinstance(r, (tuple, list)) and len(r) >= 3:
+                        s = int(r[0]); e = int(r[1]); src = int(r[2] if len(r) >= 3 else r[-1])
+                        if e > s:
+                            out.append({"start_ms": s, "end_ms": e, "source": 1 if src == 1 else 0})
+                    elif isinstance(r, dict):
+                        # active_ranges dict fallback (use beat)
+                        s = int(r.get("start_ms", 0)); e = int(r.get("end_ms", 0))
+                        if e > s:
+                            out.append({"start_ms": s, "end_ms": e, "source": 0})
+                except Exception:
+                    continue
+            out.sort(key=lambda x: x["start_ms"])
+            return out
+
+        ranges = _coerce_pairs_with_source(beat_flow_ranges)
+        if not ranges:
+            ranges = _coerce_pairs_with_source((beat_env.get("active_ranges") or []))
 
         update_frequency_ms = int(getattr(self, "dimmer_update_fq", 33)) or 33
         update_frequency_ms = max(1, update_frequency_ms)
 
-        def _scale(v, t_ms):
-            strength = float(envelope_fn(t_ms / 1000.0))
+        def _scale(v, t_ms, src):
+            # src: 0=beat, 1=flow
+            fn = flow_fn if int(src) == 1 else beat_fn
+            strength = float(fn(t_ms / 1000.0))
             return max(0, min(255, int(round(float(v) * strength))))
 
         def _range_state(t_ms, idx):
@@ -1564,8 +1578,8 @@ class ShowStructurer:
             if idx < n:
                 r = ranges[idx]
                 if r["start_ms"] <= t_ms < r["end_ms"]:
-                    return idx, True
-            return idx, False
+                    return idx, True, r["source"]
+            return idx, False, None
 
         def _next_range_start(t_ms, idx):
             idx2 = idx
@@ -1576,12 +1590,12 @@ class ShowStructurer:
                 return ranges[idx2]["start_ms"]
             return None
 
-        def _emit_scaled_snapshot(out, base_dimmers, t_ms):
+        def _emit_scaled_snapshot(out, base_dimmers, t_ms, src):
             if not base_dimmers:
                 return
             batch = []
             for (fixture_id, channel), base_val in base_dimmers.items():
-                batch.append((fixture_id, channel, _scale(base_val, t_ms)))
+                batch.append((fixture_id, channel, _scale(base_val, t_ms, src)))
             if len(batch) == 1:
                 out.append(batch[0])
             else:
@@ -1593,17 +1607,16 @@ class ShowStructurer:
         saw_first_wait = False
 
         base_dimmers = {}
-
         range_idx = 0
 
         def _in_active_range(t_ms):
             nonlocal range_idx
-            range_idx, inside = _range_state(t_ms, range_idx)
-            return inside
+            range_idx, inside, src = _range_state(t_ms, range_idx)
+            return inside, src
 
         def _process_wait(wait_ms):
             """
-            Append waits, and when inside active ranges, insert periodic scaled snapshots.
+            Append waits, and when inside beat_flow ranges, insert periodic scaled snapshots using the proper source.
             This advances seg_ms by wait_ms (segment-local time).
             """
             nonlocal seg_ms, range_idx
@@ -1621,7 +1634,7 @@ class ShowStructurer:
                 return
 
             while seg_ms < end_ms:
-                range_idx, inside = _range_state(seg_ms, range_idx)
+                range_idx, inside, src = _range_state(seg_ms, range_idx)
 
                 if not inside:
                     nxt = _next_range_start(seg_ms, range_idx)
@@ -1630,9 +1643,9 @@ class ShowStructurer:
                     if delta > 0:
                         scaled.append(int(delta))
                         seg_ms += delta
-                    range_idx, now_inside = _range_state(seg_ms, range_idx)
+                    range_idx, now_inside, src = _range_state(seg_ms, range_idx)
                     if now_inside:
-                        _emit_scaled_snapshot(scaled, base_dimmers, seg_ms)
+                        _emit_scaled_snapshot(scaled, base_dimmers, seg_ms, src)
                     continue
 
                 r = ranges[range_idx]
@@ -1644,9 +1657,9 @@ class ShowStructurer:
                     scaled.append(int(delta))
                     seg_ms = next_tick
 
-                range_idx, still_inside = _range_state(seg_ms, range_idx)
+                range_idx, still_inside, src2 = _range_state(seg_ms, range_idx)
                 if still_inside:
-                    _emit_scaled_snapshot(scaled, base_dimmers, seg_ms)
+                    _emit_scaled_snapshot(scaled, base_dimmers, seg_ms, src2)
 
         def _process_command_tuple(tup):
             nonlocal seg_ms
@@ -1657,8 +1670,9 @@ class ShowStructurer:
 
             base_dimmers[(fixture_id, channel)] = value
 
-            if _in_active_range(seg_ms):
-                return (fixture_id, channel, _scale(value, seg_ms))
+            inside, src = _in_active_range(seg_ms)
+            if inside:
+                return (fixture_id, channel, _scale(value, seg_ms, src))
             return (fixture_id, channel, value)
 
         for entry in segment_dimmers:
