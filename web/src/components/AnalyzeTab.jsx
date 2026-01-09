@@ -26,9 +26,15 @@ export default function AnalyzeTab({status}){
       <div className="row"><label>Song name (without extension)</label>
         <input value={audio} onChange={e=>setAudio(e.target.value)} placeholder="e.g. everlong" />
       </div>
-      <div className="row inline">
-        <label><input type="checkbox" checked={strobe} onChange={e=>setStrobe(e.target.checked)} /> Enable strobe (-st)</label>
-        <label><input type="checkbox" checked={simple} onChange={e=>setSimple(e.target.checked)} /> Enable simple (-si)</label>
+      <div className="row inline" style={{alignItems:'center', gap:16}}>
+        <label style={{display:'inline-flex', alignItems:'center', gap:6}}>
+          <span>Enable strobe</span>
+          <input type="checkbox" checked={strobe} onChange={e=>setStrobe(e.target.checked)} />
+        </label>
+        <label style={{display:'inline-flex', alignItems:'center', gap:6}}>
+          <span>Simple mode</span>
+          <input type="checkbox" checked={simple} onChange={e=>setSimple(e.target.checked)} />
+        </label>
       </div>
       <div className="row inline">
         <div style={{flex:1}}>
