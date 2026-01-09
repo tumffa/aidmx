@@ -13,3 +13,5 @@ showfile.txt
 /AIQLCshows/play_song_modified.bat
 /src/services/larsnet/inference_models
 /env
+
+*node_modules/

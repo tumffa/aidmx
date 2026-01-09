@@ -2,8 +2,7 @@ import os
 import threading
 import time
 from src.services.showstructurer import ShowStructurer
-from src.services.audio_analysis import audio_analysis
-from src.services.ola_dmx_controller import play_dmx_sequence
+from src.services.ola_dmx_controller import play_dmx_sequence, stop_current_playback
 
 class QueueManager:
     def __init__(self, setupfile, data_manager, qlc=None):
@@ -12,6 +11,9 @@ class QueueManager:
         self.dm = data_manager
         self.qlc = qlc
         self.structurer = ShowStructurer(data_manager)
+        # Cancellation state shared across tasks
+        self.cancel_event = threading.Event()
+        self._playback_thread = None
 
     def analyze_file(self, audio_name, strobes, simple, qlc_delay, qlc_lag):
         """Starts the file analysis process and show generation process.
@@ -25,6 +27,9 @@ class QueueManager:
         """
         print(
             f"\nProcessing {audio_name} with strobes={strobes}, simple={simple}, qlc_delay={qlc_delay} sec, qlc_lag={qlc_lag}")
+
+        # Clear any previous cancellations
+        self.cancel_event.clear()
 
         # Check for both .mp3 and .wav files
         mp3_path = "{}/songs/{}.mp3".format(self.dm.return_path("data"), audio_name)
@@ -40,7 +45,16 @@ class QueueManager:
             print(f"No file found for {audio_name} in default paths.")
             return
     
+        if self.cancel_event.is_set():
+            print("--Analysis canceled before extraction")
+            return
+
         self.dm.extract_data(audio_name, os.path.abspath(filepath))
+
+        if self.cancel_event.is_set():
+            print("--Analysis canceled before generation")
+            return
+
         self.generate(audio_name, strobes, simple, qlc_delay, qlc_lag)
         print(f"Finished\n")
 
@@ -55,6 +69,10 @@ class QueueManager:
             qlc_delay=qlc_delay,
             qlc_lag=qlc_lag)
 
+        if self.cancel_event.is_set():
+            print("--Analysis canceled after generation")
+            return
+
         scripts = scripts_dict["qlc"]["scripts"]
         function_names = scripts_dict["qlc"]["function_names"]
         self.qlc.add_track(audio_name, scripts, function_names)
@@ -64,6 +82,9 @@ class QueueManager:
 
     def play_ola_show(self, audio_name, delay, universe, start_at_sec=0.0):
         print(f"--Playing OLA show for {audio_name} with delay {delay} sec on universe {universe}, start_at={start_at_sec:.2f}s")
+
+        # Clear any previous cancellations
+        self.cancel_event.clear()
 
         struct_data = self.dm.get_struct_data(audio_name)
         song_path = struct_data.get("filepath")
@@ -96,7 +117,18 @@ class QueueManager:
         while not pygame.mixer.music.get_busy():
             time.sleep(0.01)
 
-        time.sleep(delay)
+        # Allow cancel during start delay
+        waited = 0.0
+        while waited < float(delay):
+            if self.cancel_event.is_set():
+                try:
+                    pygame.mixer.music.stop()
+                except Exception:
+                    pass
+                print("--Playback canceled before DMX start")
+                return
+            time.sleep(0.05)
+            waited += 0.05
 
         # Slice DMX sequence to start at the same timestamp
         start_ms = max(0, int(start_at_sec * 1000))
@@ -124,10 +156,47 @@ class QueueManager:
             sliced_frames = dmx_frames
 
         print(f"--Starting DMX sequence playback with OLA from {start_at_sec:.2f}s")
-        dmx_thread = threading.Thread(target=play_dmx_sequence, args=(sliced_delays, sliced_frames, universe))
-        dmx_thread.start()
-        dmx_thread.join()
-        pygame.mixer.music.stop()
+        self._playback_thread = threading.Thread(target=play_dmx_sequence, args=(sliced_delays, sliced_frames, universe), daemon=True)
+        self._playback_thread.start()
+
+        # Monitor for cancellation while DMX is playing
+        try:
+            while self._playback_thread.is_alive():
+                if self.cancel_event.is_set():
+                    print("--Playback cancel requested; stopping DMX and audio")
+                    stop_current_playback()
+                    try:
+                        pygame.mixer.music.stop()
+                    except Exception:
+                        pass
+                    return
+                time.sleep(0.05)
+        finally:
+            try:
+                pygame.mixer.music.stop()
+            except Exception:
+                pass
+
+    def request_cancel_analysis(self):
+        """Signal cancellation for the current analysis task."""
+        print("--Cancel requested for analysis")
+        self.cancel_event.set()
+
+    def request_cancel_playback(self):
+        """Signal cancellation for current playback and stop DMX/audio."""
+        print("--Cancel requested for playback")
+        self.cancel_event.set()
+        # Attempt to stop DMX immediately if running
+        try:
+            stop_current_playback()
+        except Exception:
+            pass
+        # Stop audio if mixer is active
+        try:
+            import pygame
+            pygame.mixer.music.stop()
+        except Exception:
+            pass
         
     def sync_with_struct(self):
         self.dm.sync_with_struct()
