@@ -7,7 +7,7 @@ DM on discord if you have questions @ ```_tume_```
 ## Features
 - **Segmentation**: Segments the song and applies chasers based on perceived energy.
 - **BPM sync**: Chasers are synced to BPM.
-- **Dimmer scaling**: Dimmer brightness is scaled based on kick/snare hits to sync the beat.
+- **Dimmer scaling**: Dimmer brightness can be scaled based on drum beat or volume flow.
 - **Strobes**: Optional strobe effects that are synchronized with drum onsets (most effective with metal music).
 - **QLC+ Script Generation**:
   - Builds a new QLC file based on an existing fixture template.
@@ -117,13 +117,22 @@ The chaser should return a dictionary:
     "queue": "Queue() object"
   }
   ```
-The `Queue()` object should begin with an `integer` (initial wait time) and then alternate between tuples of `(fixture_id, channel, value)` and wait time `integers`.
+The `Queue()` object should begin with an `integer` (initial wait time) and then alternate between tuples of `(fixture_id, channel, value, scaling)` and wait time `integers`.
 The `combine` function will take any number of these chaser queue dictionaries and alter the wait times so that each chaser can run concurrently.
 It then combines them into a dimmer script and a script containing the other commands. Use `self._setfixture` to generate script lines. 
-For instance, to open shutters of fixture 1, use following:
+For instance, to set fixture 1 dimmer to 255 and use no scaling, use following:
   ```python
   fixture = self.universe["abovewash"]["1"]
-  command = self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters")
+  command = self._setfixture(fixture["id"], fixture["dimmer"], 255)
+  ```
+Dimmer values can be scaled with beat/flow envelopes. You can still create chaser patterns using dimmers, because the envelope will simply scale the values.
+- Scaling with the "beat" envelope will result in the dimmers flashing to the beat.
+- Scaling with the "flow" envelope will result in the dimmers to be scaled by the volume of vocals/bass/other.
+- Scaling with the "both" envelope results in a mix, where the beat envelope is prioritized, but flow is used when there is no beat.
+
+To scale the dimmer values, use the scale_dimmer parameter:
+  ```python
+  command = self._setfixture(fixture["id"], fixture["dimmer"], 255, scale_dimmer="both")
   ```
 
 Here is an example of a chaser that moves a bright color2 to the next fixture every beat:
