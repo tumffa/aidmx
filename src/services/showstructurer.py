@@ -69,9 +69,9 @@ class ShowStructurer:
             
         return envelope_function
 
-    def _setfixture(self, fixture, channel, value, comment=""):
+    def _setfixture(self, fixture, channel, value, comment=None, scale_dimmer=None):
         value = max(0, min(255, value))
-        return (fixture, channel, value)
+        return (fixture, channel, value, scale_dimmer)
         
     def _qlc_setfixture(self, fixture, channel, value, comment=""):
         return f"setfixture:{fixture} ch:{channel} val:{value} //{comment}"
@@ -533,7 +533,7 @@ class ShowStructurer:
         result["queue"] = pulse_queue
         return result
     
-    def fastpulse(self, name, show, intervalmod=4, dimmer1=255, dimmer2=10, color1="all", length=30000.0, start=0, queuename="fastpulse0"):
+    def fastpulse(self, name, show, intervalmod=4, dimmer1=255, dimmer2=10, color1="all", length=30000.0, start=0, queuename="fastpulse0", scale_dimmer=None):
         result = {}
         fastpulse_queue = Queue()
         result["name"] = queuename
@@ -558,11 +558,11 @@ class ShowStructurer:
                     color1 = random.choice(colors)
                 last_color = color1
             for fixture in group.values():
-                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer2, f"Dimmer reset"))
+                temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer2, f"Dimmer reset", scale_dimmer))
             color_commands = self.calculate_colors(group[str(i)], color1)
             temp += color_commands
             temp.append(self._setfixture(group[str(i)]["id"], group[str(i)]["shutter"], group[str(i)]["shutters"]["open"], f"Open shutters"))
-            temp.append(self._setfixture(group[str(i)]["id"], group[str(i)]["dimmer"], dimmer1, "Dimmer off"))
+            temp.append(self._setfixture(group[str(i)]["id"], group[str(i)]["dimmer"], dimmer1, "Dimmer off", scale_dimmer))
             if time - switchinterval < 0:
                 switchinterval = time
             time -= switchinterval
@@ -575,7 +575,7 @@ class ShowStructurer:
         result["queue"] = fastpulse_queue
         return result
     
-    def side_to_side(self, name, show, intervalmod=4, dimmer1=255, dimmer2=255, color1="random", color2=None, length=30000.0, start=0, queuename="sidetoside0"):
+    def side_to_side(self, name, show, intervalmod=4, dimmer1=255, dimmer2=255, color1="random", color2=None, length=30000.0, start=0, queuename="sidetoside0", scale_dimmer=None):
         result = {}
         sidetoside_queue = Queue()
         result["name"] = queuename
@@ -624,10 +624,10 @@ class ShowStructurer:
                         color_commands = self.calculate_colors(fixture, color2)
                         temp += color_commands
                 if fixture["id"] == i:
-                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer1, f"Dimmer off"))
+                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer1, f"Dimmer off", scale_dimmer))
                     temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
                 else:
-                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer2, f"Dimmer reset"))
+                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer2, f"Dimmer reset", scale_dimmer))
                     temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
                     
             if switch == 0:
@@ -839,7 +839,7 @@ class ShowStructurer:
                 result["queue"] = blind_queue
                 return result
             
-    def simple_color(self, name, show, dimmer=255, color="red", length=30000.0, start=0, queuename="colorchaser0"):
+    def simple_color(self, name, show, dimmer=255, color="red", length=30000.0, start=0, queuename="colorchaser0", scale_dimmer=None):
         """
         Creates a static color effect that sets all lights to the specified color and dimmer
         and maintains that state for the entire duration.
@@ -877,10 +877,9 @@ class ShowStructurer:
             # Set the color
             color_commands = self.calculate_colors(fixture, color)
             temp += color_commands
-            
             # Open shutters and set dimmer to full
             temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
-            temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer, f"Full dimmer"))
+            temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer, f"Full dimmer", scale_dimmer))
         
         # Add commands and wait for the entire duration
         color_queue.enqueue(temp)
@@ -889,7 +888,7 @@ class ShowStructurer:
         result["queue"] = color_queue
         return result
     
-    def color_pulse(self, name, show, color1="red", color2="blue", dimmer=255, length=30000.0, start=0, queuename="colorpulse0"):
+    def color_pulse(self, name, show, color1="red", color2="blue", dimmer=255, length=30000.0, start=0, queuename="colorpulse0", scale_dimmer=None):
         """
         Creates a chaser effect that alternates between colors, changing each fixture gradually.
         - Colors use much faster transitions (50 units at a time)
@@ -1006,7 +1005,7 @@ class ShowStructurer:
                         temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], current_colors["blue"], f"Blue: {current_colors['blue']}"))
                     
                     # Set dimmer and shutter
-                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer, f"Dimmer"))
+                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer, f"Dimmer", scale_dimmer))
                     temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
                 
                 colorpulse_queue.enqueue(temp)
@@ -1033,7 +1032,7 @@ class ShowStructurer:
                         temp.append(self._setfixture(fixture["id"], fixture["colorchannels"]["blue"], target_color_values["blue"], f"Hold Blue: {target_color_values['blue']}"))
                     
                     # Set dimmer and shutter
-                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer, f"Dimmer"))
+                    temp.append(self._setfixture(fixture["id"], fixture["dimmer"], dimmer, f"Dimmer", scale_dimmer))
                     temp.append(self._setfixture(fixture["id"], fixture["shutter"], fixture["shutters"]["open"], f"Open shutters"))
                 
                 colorpulse_queue.enqueue(temp)
@@ -1204,30 +1203,44 @@ class ShowStructurer:
             
             if q[0] not in do_not_execute:
                 for command in commands:
-                    fixture_id, channel, original_value = command
+                    # Allow both 3-tuple and 4-tuple commands; preserve scale_dimmer flag
+                    if isinstance(command, tuple) and len(command) >= 3:
+                        fixture_id = command[0]
+                        channel = command[1]
+                        original_value = command[2]
+                        # FIX: guard access to optional 4th element
+                        scale_dimmer_flag = command[3] if len(command) >= 4 else None
+                    else:
+                        # Unexpected format; pass through
+                        segment.append(command)
+                        continue
+
                     # Store this fixture state for later restoration
                     if fixture_id not in fixture_dimmers:
                         fixture_dimmers[fixture_id] = {}
                     fixture_dimmers[fixture_id][channel] = original_value
-                    
+
                     # Only add commands to script if not in a strobe range
                     if not in_strobe_range:
                         is_dimmer_command = (fixture_id in self.fixture_dimmer_map and 
                                         channel == self.fixture_dimmer_map[fixture_id])
                         if is_dimmer_command and seperate_dimmer:
-                            # Add dimmer command to the script
-                            dimmer_command = self._setfixture(fixture_id, channel, original_value,
-                                                            f"Scaled value {original_value} from {original_value}")
+                            # Add dimmer command to the dimmer segment, preserving scale_dimmer flag
+                            dimmer_command = self._setfixture(fixture_id, channel, original_value, scale_dimmer=scale_dimmer_flag)
                             segment_dimmers.append(dimmer_command)
                         else:
-                            # if not dimmer command, just add the command as is
+                            # Non-dimmer command: pass through unchanged, including scale_dimmer flag
                             segment.append(command)
 
             # Get next wait period
             wait = queue.dequeue()
-            if wait:
+            # FIX: 0ms waits are valid; only skip when None
+            if wait is None:
+                del times[q[0]]
+                del command_queues[q[0]]
+            else:
                 times[q[0]] = wait
-        
+
         return segment, segment_dimmers
 
     def check_strobe_ranges(self, current_time_ms, wait_time, strobe_ranges):
@@ -1466,19 +1479,19 @@ class ShowStructurer:
                 if current_chaser == "ColorPulse" or simple == True: # simple mode uses only ColorPulse chaser
                     queues.append(self.color_pulse(
                         name, show, color1=primary_color1, color2=primary_color2, dimmer=255,
-                        length=length, start=start_time, queuename=f"colorpulse{i}"))
+                        length=length, start=start_time, queuename=f"colorpulse{i}", scale_dimmer="both"))
                 elif current_chaser == "FastPulse":
                     queues.append(self.fastpulse(
                         name, show, color1=[primary_color1, primary_color2],
-                        length=length, start=start_time, queuename=f"fastpulse{i}"))
+                        length=length, start=start_time, queuename=f"fastpulse{i}", scale_dimmer="both"))
                 elif current_chaser == "SideToSide":
                     queues.append(self.side_to_side(
                         name, show, color1=primary_color1, color2=primary_color2,
-                        length=length, start=start_time, queuename=f"sidetoside{i}"))
+                        length=length, start=start_time, queuename=f"sidetoside{i}", scale_dimmer="both"))
             else:
                 queues.append(self.simple_color(
                     name, show, color=idle_colour, dimmer=255, length=length, 
-                    start=start_time, queuename=f"color{i}"))
+                    start=start_time, queuename=f"color{i}", scale_dimmer="flow"))
 
             if strobes and onset_parts:
                 strobe_ranges = self.preprocess_onset_ranges(segments[i]["start"], segments[i]["end"], onset_parts)
@@ -1517,206 +1530,227 @@ class ShowStructurer:
     
     def scale_dimmer_with_envelope(self, segment_dimmers, light_strength_envelope):
         """
-        Scale dimmer values using beat_flow_ranges:
-          - When inside a beat_flow range with source 0, use the beat envelope.
-          - When inside a beat_flow range with source 1, use the flow envelope.
-          - Outside any beat_flow range, do not scale.
-
-        light_strength_envelope: container dict with keys:
-          {"beat": {...}, "flow": {...}, "beat_flow_ranges": [(start_ms, end_ms, source), ...]}
+        Per-command envelope scaling with synthetic updates during waits.
+        Flags: both → beat_flow_ranges (source 0=beat,1=flow,2=snare), beat, flow, snare. None → no scaling.
         """
         if not segment_dimmers:
             return segment_dimmers
 
-        env_container = light_strength_envelope or {}
-        beat_env = (env_container.get("beat") or {})
-        flow_env = (env_container.get("flow") or {})
+        env = light_strength_envelope or {}
+        beat_env = env.get("beat") or {}
+        flow_env = env.get("flow") or {}
+        snare_env = env.get("snare") or {}
 
-        # Build interpolation fns
         beat_fn = self._light_strength_envelope_function(beat_env) if beat_env else (lambda t: 1.0)
         flow_fn = self._light_strength_envelope_function(flow_env) if flow_env else (lambda t: 1.0)
+        snare_fn = self._light_strength_envelope_function(snare_env) if snare_env else (lambda t: 1.0)
 
-        # Prefer beat_flow_ranges; fallback to beat active_ranges (source=0) if absent
-        beat_flow_ranges = env_container.get("beat_flow_ranges") or []
+        def _to_ms_val(v):
+            try:
+                f = float(v)
+            except Exception:
+                return None
+            return int(round(f)) if f >= 1000.0 else int(round(f * 1000.0))
 
-        def _coerce_pairs_with_source(ranges_like):
+        def _dict_range_to_ms(d):
+            if "start_ms" in d and "end_ms" in d:
+                s = int(d["start_ms"]); e = int(d["end_ms"])
+            elif "start_s" in d and "end_s" in d:
+                s = _to_ms_val(d["start_s"]); e = _to_ms_val(d["end_s"])
+            else:
+                s_raw = d.get("start_ms", d.get("start_s", d.get("start", d.get("begin", d.get("from")))))
+                e_raw = d.get("end_ms", d.get("end_s", d.get("end", d.get("to"))))
+                s = _to_ms_val(s_raw) if s_raw is not None else None
+                e = _to_ms_val(e_raw) if e_raw is not None else None
+            return s, e
+
+        def _coerce_pairs_with_source(ranges_like, default_source=0):
             out = []
             for r in ranges_like:
                 try:
-                    # beat_flow_ranges entries are tuples: (start_ms, end_ms, source)
-                    if isinstance(r, (tuple, list)) and len(r) >= 3:
-                        s = int(r[0]); e = int(r[1]); src = int(r[2] if len(r) >= 3 else r[-1])
-                        if e > s:
-                            out.append({"start_ms": s, "end_ms": e, "source": 1 if src == 1 else 0})
+                    if isinstance(r, (tuple, list)) and len(r) >= 2:
+                        s = _to_ms_val(r[0]); e = _to_ms_val(r[1])
+                        src = default_source
+                        if len(r) >= 3:
+                            try:
+                                src = int(r[2])
+                            except Exception:
+                                src = default_source
+                        if s is not None and e is not None and e > s:
+                            src_norm = 2 if src == 2 else (1 if src == 1 else 0)
+                            out.append({"start_ms": s, "end_ms": e, "source": src_norm})
                     elif isinstance(r, dict):
-                        # active_ranges dict fallback (use beat)
-                        s = int(r.get("start_ms", 0)); e = int(r.get("end_ms", 0))
-                        if e > s:
-                            out.append({"start_ms": s, "end_ms": e, "source": 0})
+                        s, e = _dict_range_to_ms(r)
+                        if s is not None and e is not None and e > s:
+                            src_norm = 2 if default_source == 2 else (1 if default_source == 1 else 0)
+                            out.append({"start_ms": s, "end_ms": e, "source": src_norm})
                 except Exception:
                     continue
             out.sort(key=lambda x: x["start_ms"])
             return out
 
-        ranges = _coerce_pairs_with_source(beat_flow_ranges)
-        if not ranges:
-            ranges = _coerce_pairs_with_source((beat_env.get("active_ranges") or []))
+        def _coerce_simple_ranges(ranges_like):
+            out = []
+            for r in ranges_like:
+                try:
+                    if isinstance(r, (tuple, list)) and len(r) >= 2:
+                        s = _to_ms_val(r[0]); e = _to_ms_val(r[1])
+                    elif isinstance(r, dict):
+                        s, e = _dict_range_to_ms(r)
+                    else:
+                        continue
+                    if s is not None and e is not None and e > s:
+                        out.append({"start_ms": s, "end_ms": e})
+                except Exception:
+                    continue
+            out.sort(key=lambda x: x["start_ms"])
+            return out
 
-        update_frequency_ms = int(getattr(self, "dimmer_update_fq", 33)) or 33
-        update_frequency_ms = max(1, update_frequency_ms)
+        both_ranges = _coerce_pairs_with_source(env.get("beat_flow_ranges") or [], default_source=0)
+        if not both_ranges:
+            both_ranges = _coerce_pairs_with_source((beat_env.get("active_ranges") or []), default_source=0)
+        beat_ranges = _coerce_simple_ranges(beat_env.get("active_ranges") or [])
+        flow_ranges = _coerce_simple_ranges(flow_env.get("active_ranges") or [])
+        snare_ranges = _coerce_simple_ranges(snare_env.get("active_ranges") or [])
 
-        def _scale(v, t_ms, src):
-            # src: 0=beat, 1=flow
-            fn = flow_fn if int(src) == 1 else beat_fn
-            strength = float(fn(t_ms / 1000.0))
-            return max(0, min(255, int(round(float(v) * strength))))
-
-        def _range_state(t_ms, idx):
-            n = len(ranges)
-            while idx < n and t_ms >= ranges[idx]["end_ms"]:
-                idx += 1
-            if idx < n:
-                r = ranges[idx]
+        def _in_ranges_simple(ranges, t_ms):
+            for r in ranges:
                 if r["start_ms"] <= t_ms < r["end_ms"]:
-                    return idx, True, r["source"]
-            return idx, False, None
+                    return True
+            return False
 
-        def _next_range_start(t_ms, idx):
-            idx2 = idx
-            n = len(ranges)
-            while idx2 < n and ranges[idx2]["end_ms"] <= t_ms:
-                idx2 += 1
-            if idx2 < n:
-                return ranges[idx2]["start_ms"]
+        def _source_in_both(t_ms):
+            for r in both_ranges:
+                if r["start_ms"] <= t_ms < r["end_ms"]:
+                    return r.get("source", 0)
             return None
 
-        def _emit_scaled_snapshot(out, base_dimmers, t_ms, src):
-            if not base_dimmers:
-                return
-            batch = []
-            for (fixture_id, channel), base_val in base_dimmers.items():
-                batch.append((fixture_id, channel, _scale(base_val, t_ms, src)))
-            if len(batch) == 1:
-                out.append(batch[0])
-            else:
-                out.append(batch)
+        def _fn_for_flag_at_time(flag, t_ms):
+            f = (flag or "").strip().lower()
+            if not f:
+                return None
+            if f == "beat":
+                return beat_fn if _in_ranges_simple(beat_ranges, t_ms) else None
+            if f == "flow":
+                return flow_fn if _in_ranges_simple(flow_ranges, t_ms) else None
+            if f == "snare":
+                return snare_fn if _in_ranges_simple(snare_ranges, t_ms) else None
+            if f == "both":
+                src = _source_in_both(t_ms)
+                if src is None:
+                    return None
+                return flow_fn if src == 1 else snare_fn if src == 2 else beat_fn
+            return None
+
+        def _scale_value(value, t_ms, fn):
+            if fn is None:
+                return value
+            t_sec = t_ms / 1000.0
+            strength = float(fn(t_sec))
+            return max(0, min(255, int(round(float(value) * strength))))
+
+        # Track per-fixture last original value and selected flag
+        flagged = {}  # (fixture_id, channel) -> {"base": int, "flag": str}
 
         scaled = []
-
         seg_ms = 0
         saw_first_wait = False
-
-        base_dimmers = {}
-        range_idx = 0
-
-        def _in_active_range(t_ms):
-            nonlocal range_idx
-            range_idx, inside, src = _range_state(t_ms, range_idx)
-            return inside, src
-
-        def _process_wait(wait_ms):
-            """
-            Append waits, and when inside beat_flow ranges, insert periodic scaled snapshots using the proper source.
-            This advances seg_ms by wait_ms (segment-local time).
-            """
-            nonlocal seg_ms, range_idx
-
-            wait_ms = int(round(float(wait_ms)))
-            wait_ms = max(0, wait_ms)
-            if wait_ms == 0:
-                return
-
-            end_ms = seg_ms + wait_ms
-
-            if not ranges or not base_dimmers:
-                scaled.append(wait_ms)
-                seg_ms = end_ms
-                return
-
-            while seg_ms < end_ms:
-                range_idx, inside, src = _range_state(seg_ms, range_idx)
-
-                if not inside:
-                    nxt = _next_range_start(seg_ms, range_idx)
-                    target = end_ms if nxt is None else min(end_ms, nxt)
-                    delta = target - seg_ms
-                    if delta > 0:
-                        scaled.append(int(delta))
-                        seg_ms += delta
-                    range_idx, now_inside, src = _range_state(seg_ms, range_idx)
-                    if now_inside:
-                        _emit_scaled_snapshot(scaled, base_dimmers, seg_ms, src)
-                    continue
-
-                r = ranges[range_idx]
-                range_end = min(r["end_ms"], end_ms)
-
-                next_tick = min(seg_ms + update_frequency_ms, range_end)
-                delta = next_tick - seg_ms
-                if delta > 0:
-                    scaled.append(int(delta))
-                    seg_ms = next_tick
-
-                range_idx, still_inside, src2 = _range_state(seg_ms, range_idx)
-                if still_inside:
-                    _emit_scaled_snapshot(scaled, base_dimmers, seg_ms, src2)
-
-        def _process_command_tuple(tup):
-            nonlocal seg_ms
-            fixture_id, channel, value = tup
-            fixture_id = int(fixture_id)
-            channel = int(channel)
-            value = int(value)
-
-            base_dimmers[(fixture_id, channel)] = value
-
-            inside, src = _in_active_range(seg_ms)
-            if inside:
-                return (fixture_id, channel, _scale(value, seg_ms, src))
-            return (fixture_id, channel, value)
+        update_frequency_ms = max(1, int(getattr(self, "dimmer_update_fq", 33)))
 
         for entry in segment_dimmers:
             if isinstance(entry, int):
-                wait_ms = max(0, entry)
+                wait_ms = max(0, int(round(float(entry))))
+                if wait_ms == 0:
+                    scaled.append(0)
+                    continue
 
+                # First wait: pass-through to align segment start
                 if not saw_first_wait:
                     saw_first_wait = True
                     scaled.append(wait_ms)
                     continue
 
-                _process_wait(wait_ms)
+                end_ms = seg_ms + wait_ms
+                while seg_ms < end_ms:
+                    delta = min(update_frequency_ms, end_ms - seg_ms)
+                    scaled.append(int(delta))
+                    seg_ms += delta
+
+                    # Synthetic scaled snapshot for all flagged fixtures active at this time
+                    batch = []
+                    for (fx, ch), info in flagged.items():
+                        fn = _fn_for_flag_at_time(info["flag"], seg_ms)
+                        if fn is None:
+                            continue
+                        val = _scale_value(info["base"], seg_ms, fn)
+                        batch.append((int(fx), int(ch), int(val), info["flag"]))
+                    if batch:
+                        scaled.append(batch)
                 continue
 
-            if isinstance(entry, tuple) and len(entry) == 3:
-                scaled.append(_process_command_tuple(entry))
+            if isinstance(entry, tuple) and len(entry) >= 3:
+                fixture_id, channel, value = int(entry[0]), int(entry[1]), int(entry[2])
+                flag = entry[3] if len(entry) >= 4 else None
+                # Update tracking if this command carries a scale flag
+                if flag:
+                    flagged[(fixture_id, channel)] = {"base": int(value), "flag": str(flag).lower()}
+                else:
+                    # If no flag, update base only if this fixture is already flagged (preserve current flag)
+                    if (fixture_id, channel) in flagged:
+                        flagged[(fixture_id, channel)]["base"] = int(value)
+
+                fn = _fn_for_flag_at_time(flag, seg_ms) if flag else None
+                new_val = _scale_value(int(value), seg_ms, fn)
+                scaled.append((fixture_id, channel, new_val, flag))
                 continue
 
             if isinstance(entry, list):
-                new_batch = []
+                batch_out = []
+                seen = set()
                 for sub in entry:
-                    if isinstance(sub, tuple) and len(sub) == 3:
-                        new_batch.append(_process_command_tuple(sub))
+                    if isinstance(sub, tuple) and len(sub) >= 3:
+                        fixture_id, channel, value = int(sub[0]), int(sub[1]), int(sub[2])
+                        flag = sub[3] if len(sub) >= 4 else None
+                        if flag:
+                            flagged[(fixture_id, channel)] = {"base": int(value), "flag": str(flag).lower()}
+                        else:
+                            if (fixture_id, channel) in flagged:
+                                flagged[(fixture_id, channel)]["base"] = int(value)
+                        fn = _fn_for_flag_at_time(flag, seg_ms) if flag else None
+                        new_val = _scale_value(int(value), seg_ms, fn)
+                        batch_out.append((fixture_id, channel, new_val, flag))
+                        seen.add((fixture_id, channel))
                     else:
-                        new_batch.append(sub)
-                scaled.append(new_batch)
+                        batch_out.append(sub)
+                scaled.append(batch_out)
+
+                # Inject synthetic scaled snapshot for flagged fixtures not in this batch
+                synth = []
+                for (fx, ch), info in flagged.items():
+                    if (fx, ch) in seen:
+                        continue
+                    fn = _fn_for_flag_at_time(info["flag"], seg_ms)
+                    if fn is None:
+                        continue
+                    val = _scale_value(info["base"], seg_ms, fn)
+                    synth.append((int(fx), int(ch), int(val), info["flag"]))
+                if synth:
+                    scaled.append(synth)
                 continue
 
+            # Passthrough for unknown types
             scaled.append(entry)
 
         return scaled
     
     def combine_scripts_to_ola_format(self, scripts):
         """
-        Merge multiple scripts (each: [wait_ms, (fixture_id, rel_channel, value), ..., wait_ms, ...])
+        Merge multiple scripts (each: [wait_ms, (fixture_id, rel_channel, value[, flag]), ..., wait_ms, ...])
         into (frame_delays_ms, dmx_frames) for OLA.
         Maps channel to absolute: abs_channel = self.fixture_addresses[fixture_id] + rel_channel
         """
-        # Default tick ~30 Hz => minimum ~33 ms between scheduled frames
         max_freq = 30.0
-        min_frame_interval_ms = 33 # int(round(1000.0 / max_freq))
-
-        def _is_command_tuple(x):
-            return isinstance(x, tuple) and len(x) == 3
+        min_frame_interval_ms = 33
 
         def script_event_iterator(script):
             idx = 0
@@ -1733,12 +1767,13 @@ class ShowStructurer:
                 commands = []
                 while idx < n and not isinstance(script[idx], int):
                     cmd = script[idx]
-                    if _is_command_tuple(cmd):
-                        commands.append(cmd)
+                    if isinstance(cmd, tuple) and len(cmd) >= 3:
+                        # Normalize to 3-tuple for OLA
+                        commands.append((cmd[0], cmd[1], cmd[2]))
                     elif isinstance(cmd, list):
                         for sub in cmd:
-                            if _is_command_tuple(sub):
-                                commands.append(sub)
+                            if isinstance(sub, tuple) and len(sub) >= 3:
+                                commands.append((sub[0], sub[1], sub[2]))
                     idx += 1
 
                 yield wait_ms, commands
@@ -1768,7 +1803,6 @@ class ShowStructurer:
                 ready = [s for s in script_states if s["next_wait"] == 0]
                 for state in ready:
                     for fixture_id, rel_channel, value in state["pending"]:
-                        # Map to absolute channel
                         abs_channel = self.fixture_addresses[fixture_id] + rel_channel
                         if isinstance(abs_channel, int) and 1 <= abs_channel <= self.universe_size:
                             current_levels[abs_channel - 1] = max(0, min(255, int(value)))
@@ -1792,13 +1826,9 @@ class ShowStructurer:
         dmx_frames.append(blackout)
         frame_delays_ms.append(min_frame_interval_ms)
 
-        result = {}
-        result["frame_delays_ms"] = frame_delays_ms
-        result["dmx_frames"] = dmx_frames
-
+        result = {"frame_delays_ms": frame_delays_ms, "dmx_frames": dmx_frames}
         return result
     
-
     def convert_scripts_to_qlc_format(self, scripts, qlc_delay, qlc_lag, is_dimmer=False):
         qlc_delay = int(round(float(qlc_delay) * 1000))
 
@@ -1824,8 +1854,9 @@ class ShowStructurer:
                     out.append(self._qlc_wait(wait_scaled))
                 else:
                     out.append(self._qlc_wait(wait_time))
-            elif _is_cmd_tuple(entry):
-                fixture, channel, value = entry
+            elif _is_cmd_tuple(entry) or (isinstance(entry, tuple) and len(entry) >= 4):
+                # Accept tuples of length 3 or 4; ignore optional 4th (scale_dimmer)
+                fixture, channel, value = entry[0], entry[1], entry[2]
                 out.append(self._qlc_setfixture(fixture, channel, value, ""))
             elif isinstance(entry, list):
                 for sub in entry:

@@ -586,8 +586,6 @@ def get_pauses(
             merged_pauses.append([s, e, info])
 
     pauses_out = [(int(s), int(e), info) for (s, e, info) in merged_pauses]
-    for pause in pauses_out:
-        print(f"Pause {pause[0]/fps:.2f}s to {pause[1]/fps:.2f}s - drums:{pause[2].get('drums')} bass:{pause[2].get('bass')} other:{pause[2].get('other')} vocals:{pause[2].get('vocals')} segment_index:{pause[2].get('segment_index')} scale_ok:{pause[2].get('scale_ok')}")
     return [{"pauses": pauses_out}]
 
 def get_pauses_for_segment(rms, threshold):
