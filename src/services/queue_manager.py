@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from src.services.showstructurer import ShowStructurer
+from src.services.dmx_builder.showstructurer import ShowStructurer
 from src.services.ola_dmx_controller import play_dmx_sequence, stop_current_playback
 
 class QueueManager:
@@ -73,9 +73,9 @@ class QueueManager:
             print("--Analysis canceled after generation")
             return
 
-        scripts = scripts_dict["qlc"]["scripts"]
-        function_names = scripts_dict["qlc"]["function_names"]
-        self.qlc.add_track(audio_name, scripts, function_names)
+        # scripts = scripts_dict["qlc"]["scripts"]
+        # function_names = scripts_dict["qlc"]["function_names"]
+        # self.qlc.add_track(audio_name, scripts, function_names)
 
         frame_delays_ms, dmx_frames = scripts_dict["ola"]["frame_delays_ms"], scripts_dict["ola"]["dmx_frames"]
         self.dm.save_ola_sequence(audio_name, frame_delays_ms, dmx_frames)

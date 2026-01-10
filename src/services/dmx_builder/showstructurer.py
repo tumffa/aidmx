@@ -700,11 +700,10 @@ class ShowStructurer:
         result["queue"] = queue
         return result
     
-    def randomstrobe(self, name, show, length=30000.0, start=0, queuename="strobe0", strobecolor="white", light_selection_period=50):
+    def randomstrobe(self, name, show, length=30000.0, queuename="strobe0", strobecolor="white", light_selection_period=50):
         result = {}
         strobe_queue = Queue()
         result["name"] = queuename
-        strobe_queue.enqueue(start)
         groups = []
         if "abovewash" in self.universe:
             group1 = self.universe["abovewash"]
@@ -1071,183 +1070,197 @@ class ShowStructurer:
         result["queue"] = colorpulse_queue
         return result
     
-    def combine(self, queues, end_time=None, seperate_dimmer=True, strobe_ranges=None):
+    def combine(self, queues, start_time=None, end_time=None, seperate_dimmer=True, strobe_ranges=None):
         """
-        Combines multiple fixture/wait command queues into a single sequence per time segment.
-        If needed, keeps track of fixture dimmer values separately
+        Combines multiple chaser-compiled scripts (plain lists) into a single sequence per time segment.
 
-        Args:
-            queues: List of queue dictionaries [wait, [command1, command2, ...], wait, ...]
-            start_time: Start of the segment -- time offset from the beginning of the song
-            seperate_dimmer: If True, separate dimmer commands from main commands
-            strobe_ranges: List of tuples defining strobe ranges (start, end) in milliseconds
-            
-        Returns:
-            Tuple of (main_segment, dimmer_segment)
-            All different queues commands in main_segment\n
-            Dimmer commands in dimmer_segment if seperate_dimmer is True, otherwise None.\n
-            The lists consist of QLC+ commands for a script
+        Notes on timebases:
+          - The generated script is on an absolute song timeline if start_time is provided
+            (we prepend a leading wait = start_time).
+          - strobe_ranges produced by preprocess_onset_ranges() are segment-local *seconds*
+            (0..segment_length), so we must check strobes against a segment-local clock.
         """
+        # Normalize to list of scripts (lists). Support legacy dicts with Queue via get_queue().
+        def _queue_to_list(qobj):
+            try:
+                return list(qobj.get_queue())
+            except Exception:
+                return []
 
-        # Main pattern commands (excluding dimmer commands)
+        scripts = []
+        for q in (queues or []):
+            if isinstance(q, list):
+                scripts.append(list(q))
+            elif isinstance(q, dict):
+                if "script" in q and isinstance(q["script"], list):
+                    scripts.append(list(q["script"]))
+                elif "queue" in q and hasattr(q["queue"], "get_queue"):
+                    scripts.append(_queue_to_list(q["queue"]))
+
+        # Prepend start_time to each script if provided (absolute timeline alignment)
+        segment_start_abs_ms = None
+        if start_time is not None:
+            try:
+                segment_start_abs_ms = int(round(float(start_time)))
+            except Exception:
+                segment_start_abs_ms = 0
+            scripts = [[segment_start_abs_ms] + (s or []) for s in scripts]
+        else:
+            segment_start_abs_ms = 0
+
         segment = []
-
-        # Separate list for dimmer commands
         segment_dimmers = []
-        
-        # Keep track of fixture states for future restoration after a strobe range
-        fixture_dimmers = {}  # {fixture_id: {"channel": channel, "original_value": value}}
-        
-        # Initialize time tracking (relative to the start of the segment)
+        fixture_dimmers = {}
+
         if end_time is None:
-            end_time = float('inf')
-        current_time_ms = 0
+            end_time = float("inf")
+        current_time_ms = 0  # absolute song timeline (because of the prepended start wait)
 
-        # Initialize command_queues based on provided chaser queues
-        command_queues = {}
-        for queue in queues:
-            command_queues[queue["name"]] = queue["queue"]
-        
-        # Dictionary to keep track of the next wait time for each queue
-        times = {}
-        for queue in queues:
-            times[queue["name"]] = queue["queue"].dequeue()
-        
-        index = 0
-        pattern_started = False
-        
-        while len(times) > 0:
-            do_not_execute = []
-            min_time = min(times.values()) # Find the minimum wait time across all queues
-            # Find the queue(s) with the same minimum wait time
-            min_queues = [k for k, v in times.items() if v == min_time] 
-            if 'flood' in min_queues:
-                q = ('flood', min_time)
-            else:
-                q = min_queues[0], min_time
-                    
-            if "pause" not in q[0]:
-                index2 = int(re.search(r'\d+$', q[0]).group())
-                if index2 > index:
-                    index = index2
-                elif index2 < index:
-                    for key in command_queues:
-                        key_index = int(re.search(r'\d+$', key).group())
-                        if key_index < index:
-                            do_not_execute.append(key)
-            
-            # Choose the queue with the smallest wait time
-            queue = command_queues[q[0]]
-            wait_time = q[1] # extract the wait time from the queue
+        def _event_iter(script):
+            idx = 0
+            n = len(script)
+            while idx < n:
+                entry = script[idx]
+                if isinstance(entry, int):
+                    wait_ms = max(0, int(round(float(entry))))
+                    idx += 1
+                    cmds = []
+                    while idx < n and not isinstance(script[idx], int):
+                        cmds.append(script[idx])
+                        idx += 1
+                    yield wait_ms, cmds
+                else:
+                    cmds = []
+                    while idx < n and not isinstance(script[idx], int):
+                        cmds.append(script[idx])
+                        idx += 1
+                    yield 0, cmds
 
-            # If this is the first iteration, we need to wait before starting the pattern
-            # The first wait time matches segment start time. Wait this time - 1 ms
-            # Start with each queue having wait time of 1 ms
-            if not pattern_started:
-                wait_time -= 1
-                segment.append(self._wait(wait_time, f"Initial wait of {wait_time + 1} - 1 ms"))
-                if seperate_dimmer:
-                    segment_dimmers.append(self._wait(wait_time, f"Initial wait of {wait_time + 1} - 1 ms (dimmer)"))
-                for name in times:
-                    times[name] -= wait_time # reduce each queue wait to 1
-                pattern_started = True
+        states = []
+        for s in scripts:
+            it = _event_iter(s)
+            try:
+                w, cmds = next(it)
+            except StopIteration:
                 continue
+            states.append({"iter": it, "next_wait": w, "pending": cmds})
 
-            # Check if we are entering/in/exiting a strobe range
-            entering_strobe_range, in_strobe_range, exiting_strobe_range, wait_time_till_strobe, strobe_range = self.check_strobe_ranges(
-                current_time_ms, wait_time, strobe_ranges
-            )
+        while states and current_time_ms < end_time:
+            min_wait = min(max(0, int(round(float(st["next_wait"])))) for st in states)
+
+            # current_time_ms is already on the absolute timeline because we prepend start_time
+            if strobe_ranges:
+                entering_strobe_range, in_strobe_range, exiting_strobe_range, wait_time_till_strobe, strobe_range = \
+                    self.check_strobe_ranges(current_time_ms, min_wait, strobe_ranges)
+            else:
+                entering_strobe_range = False
+                in_strobe_range = False
+                exiting_strobe_range = False
+                wait_time_till_strobe = int(round(float(min_wait)))
+                strobe_range = None
+
+            advance_ms = min_wait
+            if entering_strobe_range:
+                advance_ms = wait_time_till_strobe
+            if in_strobe_range and exiting_strobe_range:
+                advance_ms = wait_time_till_strobe + 1
+
+            if advance_ms > 0:
+                segment.append(self._wait(advance_ms))
+                if seperate_dimmer:
+                    segment_dimmers.append(self._wait(advance_ms))
+                current_time_ms += advance_ms
+                for st in states:
+                    st["next_wait"] = max(0, int(round(float(st["next_wait"]))) - advance_ms)
 
             if entering_strobe_range:
-                # Adjust wait time to the time till the strobe range start
-                wait_time = wait_time_till_strobe
+                continue
 
             if in_strobe_range and exiting_strobe_range:
-                # Wait till strobe range end + 1 ms
-                wait_time = wait_time_till_strobe + 1
-
-            # Add the remaining wait time to the script
-            segment.append(self._wait(wait_time))
-            if seperate_dimmer:
-                segment_dimmers.append(self._wait(wait_time))
-            
-            current_time_ms += wait_time # Update current time
-            
-            # Reduce wait time from all script queues
-            for name in times:
-                times[name] -= wait_time
-                if times[name] < 0:
-                    times[name] = 0
-
-            # If we are to enter a strobe range before the next command (entering_strobe_range),
-            # we can skip processing commands
-            if entering_strobe_range:
+                segment, segment_dimmers = self.restore_fixture_states(fixture_dimmers, segment, segment_dimmers)
                 continue
 
-            # If we are exiting a strobe range, we need to restore fixture states
-            if exiting_strobe_range:
-                segment, segment_dimmers = self.restore_fixture_states(
-                    fixture_dimmers, segment, segment_dimmers)
-                continue
-                    
-            #### PROCESS COMMANDS ####
+            ready = [st for st in states if int(round(float(st["next_wait"]))) == 0]
 
-            # get all fixture update commands that need to be executed at this timeframe 
-            commands = queue.dequeue()
-
-            # if queue is over, remove it
-            if commands == None:
-                del times[q[0]]
-                del command_queues[q[0]]
+            # Do not emit commands during strobe ranges; just advance iterators.
+            if ready and in_strobe_range:
+                to_remove = []
+                for st in ready:
+                    try:
+                        w, cmds_next = next(st["iter"])
+                        st["next_wait"] = max(0, int(round(float(w))))
+                        st["pending"] = cmds_next
+                    except StopIteration:
+                        to_remove.append(st)
+                for st in to_remove:
+                    try:
+                        states.remove(st)
+                    except ValueError:
+                        pass
                 continue
-            
-            if q[0] not in do_not_execute:
-                for command in commands:
-                    # Allow both 3-tuple and 4-tuple commands; preserve scale_dimmer flag
-                    if isinstance(command, tuple) and len(command) >= 3:
-                        fixture_id = command[0]
-                        channel = command[1]
-                        original_value = command[2]
-                        # FIX: guard access to optional 4th element
+
+            for st in ready:
+                cmds = st.get("pending") or []
+                for command in cmds:
+                    if isinstance(command, list):
+                        for sub in command:
+                            if isinstance(sub, tuple) and len(sub) >= 3:
+                                fixture_id, channel, original_value = sub[0], sub[1], sub[2]
+                                scale_dimmer_flag = sub[3] if len(sub) >= 4 else None
+                                fixture_dimmers.setdefault(fixture_id, {})[channel] = original_value
+                                is_dimmer_command = (
+                                    fixture_id in self.fixture_dimmer_map
+                                    and channel == self.fixture_dimmer_map[fixture_id]
+                                )
+                                if is_dimmer_command and seperate_dimmer:
+                                    dimmer_command = self._setfixture(
+                                        fixture_id, channel, original_value,
+                                        scale_dimmer=(scale_dimmer_flag if scale_dimmer_flag is not None else "both")
+                                    )
+                                    segment_dimmers.append(dimmer_command)
+                                else:
+                                    segment.append(sub)
+                            else:
+                                segment.append(sub)
+                    elif isinstance(command, tuple) and len(command) >= 3:
+                        fixture_id, channel, original_value = command[0], command[1], command[2]
                         scale_dimmer_flag = command[3] if len(command) >= 4 else None
-                    else:
-                        # Unexpected format; pass through
-                        segment.append(command)
-                        continue
-
-                    # Store this fixture state for later restoration
-                    if fixture_id not in fixture_dimmers:
-                        fixture_dimmers[fixture_id] = {}
-                    fixture_dimmers[fixture_id][channel] = original_value
-
-                    # Only add commands to script if not in a strobe range
-                    if not in_strobe_range:
-                        is_dimmer_command = (fixture_id in self.fixture_dimmer_map and 
-                                        channel == self.fixture_dimmer_map[fixture_id])
+                        fixture_dimmers.setdefault(fixture_id, {})[channel] = original_value
+                        is_dimmer_command = (
+                            fixture_id in self.fixture_dimmer_map
+                            and channel == self.fixture_dimmer_map[fixture_id]
+                        )
                         if is_dimmer_command and seperate_dimmer:
-                            # Add dimmer command to the dimmer segment, preserving scale_dimmer flag
-                            dimmer_command = self._setfixture(fixture_id, channel, original_value, scale_dimmer=scale_dimmer_flag)
+                            dimmer_command = self._setfixture(
+                                fixture_id, channel, original_value,
+                                scale_dimmer=(scale_dimmer_flag if scale_dimmer_flag is not None else "both")
+                            )
                             segment_dimmers.append(dimmer_command)
                         else:
-                            # Non-dimmer command: pass through unchanged, including scale_dimmer flag
                             segment.append(command)
+                    else:
+                        segment.append(command)
 
-            # Get next wait period
-            wait = queue.dequeue()
-            # FIX: 0ms waits are valid; only skip when None
-            if wait is None:
-                del times[q[0]]
-                del command_queues[q[0]]
-            else:
-                times[q[0]] = wait
+                try:
+                    w, cmds_next = next(st["iter"])
+                    st["next_wait"] = max(0, int(round(float(w))))
+                    st["pending"] = cmds_next
+                except StopIteration:
+                    states.remove(st)
 
         return segment, segment_dimmers
 
     def check_strobe_ranges(self, current_time_ms, wait_time, strobe_ranges):
-        """Checks if we are entering, in, or exiting a strobe range.
-
-        strobe_ranges: List of (start_sec, end_sec), segment-local seconds.
         """
+        Checks if we are entering, in, or exiting a strobe range.
+
+        Args:
+            current_time_ms: segment-local time in milliseconds (0 at segment start)
+            wait_time: next wait in milliseconds (segment-local)
+            strobe_ranges: list of (start, end) ranges; expected segment-local seconds,
+                          but we also accept ms and auto-normalize.
+        """
+
         entering_strobe_range = False
         in_strobe_range = False
         exiting_strobe_range = False
@@ -1258,27 +1271,35 @@ class ShowStructurer:
             current_time_sec = float(current_time_ms) / 1000.0
             end_time_sec = current_time_sec + (float(wait_time) / 1000.0)
 
-            # In range: [start, end)  (end exclusive prevents "sticky" end)
+            # Normalize ranges to seconds
+            norm = []
             for r in strobe_ranges:
-                start, end = float(r[0]), float(r[1])
+                if not isinstance(r, (list, tuple)) or len(r) < 2:
+                    continue
+                s = r[0]; e = r[1]
+                if s is None or e is None:
+                    continue
+                if e > s:
+                    norm.append((s, e))
+
+            # In range: [start, end)
+            for start, end in norm:
                 if start <= current_time_sec < end:
                     in_strobe_range = True
                     strobe_range = (start, end)
                     break
 
-            # Entering if start happens within (current, end] (start inclusive at end boundary)
+            # Entering if start happens within (current, end]
             if not in_strobe_range:
-                for r in strobe_ranges:
-                    start, end = float(r[0]), float(r[1])
+                for start, end in norm:
                     if current_time_sec < start <= end_time_sec:
                         entering_strobe_range = True
-                        # round to int ms; ensure we don't produce a 0ms "advance" due to float noise
                         ms = int(round((start - current_time_sec) * 1000.0))
                         wait_time_till_strobe = max(1, ms) if ms > 0 else 1
                         strobe_range = (start, end)
                         break
 
-            # Exiting if end happens within (current, end] (end inclusive at boundary)
+            # Exiting if end happens within (current, end]
             if in_strobe_range and strobe_range is not None:
                 start, end = strobe_range
                 if current_time_sec < end <= end_time_sec:
@@ -1309,55 +1330,6 @@ class ShowStructurer:
                     cmd = self._setfixture(fixture_id, channel, value)
                     segment.append(cmd)
         return segment, segment_dimmers
-    
-    def preprocess_onset_ranges(self, start_time, end_time, onset_ranges):
-        """
-        Preprocess onset ranges for a specific time segment.
-        Onset times are provided relative to the song start time, rather than the segment start time.
-        
-        Args:
-            start_time: Start time of segment in seconds
-            end_time: End time of segment in seconds
-            onset_ranges: List of [start, end] ranges in seconds
-            
-        Returns:
-            List of onset ranges adjusted relative to segments start_time
-        """
-        if not onset_ranges:
-            return []
-            
-        processed_ranges = []
-        segment_duration = end_time - start_time
-        
-        for onset_start, onset_end in onset_ranges:
-            # Check if this onset range overlaps with our segment
-            if onset_end <= start_time or onset_start >= end_time:
-                # No overlap, skip this range
-                continue
-                
-            # Adjust start if needed
-            if onset_start < start_time:
-                # If onset starts before our segment, adjust
-                adjusted_start = 0.05
-            else:
-                # Otherwise shift relative to segment start
-                adjusted_start = onset_start - start_time
-                
-            # Adjust end if needed
-            if onset_end > end_time:
-                # If onset ends after our segment, adjust
-                adjusted_end = segment_duration - 0.05
-            else:
-                # Otherwise shift relative to segment start
-                adjusted_end = onset_end - start_time
-                
-            # Make sure we don't have an invalid range after adjustments
-            if adjusted_end <= adjusted_start:
-                continue
-                
-            processed_ranges.append([adjusted_start, adjusted_end])
-        
-        return processed_ranges
 
     def generate_show(self, name, qxw, strobes, simple, qlc_delay, qlc_lag):
         """
@@ -1421,38 +1393,37 @@ class ShowStructurer:
         # Add premade chasers to use with virtual console
         self.add_chasers(name, show, qxw)
 
+        def _construct_strobe(universe, chaser_name, length):
+            from src.services.dmx_builder.chaser import strobe
+            result = {}
+            script = strobe(universe=universe, length=length)
+            result["name"] = chaser_name
+            # Return plain script; start_time will be added by combine
+            result["script"] = script
+            return result
+
         # Add strobe scripts
         onset_parts = None
         if strobes:
             onset_parts = show.struct["onset_parts"]
             for part in onset_parts:
-                queues = []
-                queues.append(self.randomstrobe(name, show,
-                                                length=part[1]*1000-part[0]*1000,
-                                                start=part[0]*1000,
-                                                queuename=f"strobe{part[0]}",
-                                                light_selection_period=50))
-                # Combine returns (main, dimmers). Keep both.
-                ola_script, ola_dimmers = self.combine(queues)
+                start = part[0]*1000
+                end = part[1]*1000
 
-                # OLA: append both tracks
-                ola_scripts.append(ola_script)
-                ola_scripts.append(ola_dimmers)
+                strobe = _construct_strobe(
+                    universe=self.universe,
+                    chaser_name=f"strobechaser{part[0]}",
+                    length=(end - start)
+                )
 
-                # QLC+: queue (no lag), dimmers (with lag scaling)
-                qlc_queue = self.convert_scripts_to_qlc_format([ola_script],
-                                                               qlc_delay=qlc_delay,
-                                                               qlc_lag=1.0,
-                                                               is_dimmer=False)[0]
-                qlc_dim = self.convert_scripts_to_qlc_format([ola_dimmers],
-                                                             qlc_delay=qlc_delay,
-                                                             qlc_lag=qlc_lag,
-                                                             is_dimmer=True)[0]
-                qlc_scripts.append(qlc_queue)
-                qlc_scripts.append(qlc_dim)
-
-                function_names.append(f"strobe{part[0]}")
-                function_names.append(f"strobe{part[0]}_dimmers")
+                scripts, dimmers = self.combine(
+                    [strobe],
+                    start_time=start,
+                    end_time=end,
+                    seperate_dimmer=False,
+                    strobe_ranges=None
+                )
+                ola_scripts.append(scripts)
 
         # Add scripts for each segment in the song
         i = 0
@@ -1460,59 +1431,75 @@ class ShowStructurer:
             i += 1
         onefocus = (len(show.struct["focus"]) == 1) # check how many segments are energetic i.e. verse/chorus/inst
 
+        def _construct_queue_chaser(universe, chaser_name, length, interval, start):
+            from src.services.dmx_builder.chaser import color_pulse
+            result = {}
+            script = color_pulse(universe=universe, interval=interval, length=length)
+            result["name"] = chaser_name
+            # Return plain script; start_time will be added by combine
+            result["script"] = script
+            return result
+
         for i in range(i, len(segments)):
             start_time = segments[i]["start"]*1000
             end_time = segments[i]["end"]*1000
             length = (segments[i]["end"] - segments[i]["start"])*1000
             queues = []
-            if segments[i]["is_chorus_section"]:
-                # Use the single primary chaser for all energetic segments
-                current_chaser = primary_chaser
-                is_focus_segment = segments[i]["label"] == show.struct["focus"]["first"]
-                
-                # Override chaser selection for focus segments if needed
-                if not onefocus and is_focus_segment and current_chaser == "ColorPulse":
-                    # If it's a focus segment and onefocus is False, don't use ColorPulse
-                    current_chaser = random.choice(["FastPulse", "SideToSide"])
-                
-                # Apply the selected chaser
-                if current_chaser == "ColorPulse" or simple == True: # simple mode uses only ColorPulse chaser
-                    queues.append(self.color_pulse(
-                        name, show, color1=primary_color1, color2=primary_color2, dimmer=255,
-                        length=length, start=start_time, queuename=f"colorpulse{i}", scale_dimmer="both"))
-                elif current_chaser == "FastPulse":
-                    queues.append(self.fastpulse(
-                        name, show, color1=[primary_color1, primary_color2],
-                        length=length, start=start_time, queuename=f"fastpulse{i}", scale_dimmer="both"))
-                elif current_chaser == "SideToSide":
-                    queues.append(self.side_to_side(
-                        name, show, color1=primary_color1, color2=primary_color2,
-                        length=length, start=start_time, queuename=f"sidetoside{i}", scale_dimmer="both"))
-            else:
-                queues.append(self.simple_color(
-                    name, show, color=idle_colour, dimmer=255, length=length, 
-                    start=start_time, queuename=f"color{i}", scale_dimmer="both"))
 
-            if strobes and onset_parts:
-                strobe_ranges = self.preprocess_onset_ranges(segments[i]["start"], segments[i]["end"], onset_parts)
-            else:
-                strobe_ranges = None
+            queues.append(_construct_queue_chaser(
+                universe=self.universe,
+                chaser_name=f"mainchaser{i}",
+                length=length,
+                interval=show.beatinterval * 1000,
+                start=start_time)
+            )
+
+            # if segments[i]["is_chorus_section"]:
+            #     # Use the single primary chaser for all energetic segments
+            #     current_chaser = primary_chaser
+            #     is_focus_segment = segments[i]["label"] == show.struct["focus"]["first"]
+                
+            #     # Override chaser selection for focus segments if needed
+            #     if not onefocus and is_focus_segment and current_chaser == "ColorPulse":
+            #         # If it's a focus segment and onefocus is False, don't use ColorPulse
+            #         current_chaser = random.choice(["FastPulse", "SideToSide"])
+                
+            #     # Apply the selected chaser
+            #     if current_chaser == "ColorPulse" or simple == True: # simple mode uses only ColorPulse chaser
+            #         queues.append(self.color_pulse(
+            #             name, show, color1=primary_color1, color2=primary_color2, dimmer=255,
+            #             length=length, start=start_time, queuename=f"colorpulse{i}", scale_dimmer="both"))
+            #     elif current_chaser == "FastPulse":
+            #         queues.append(self.fastpulse(
+            #             name, show, color1=[primary_color1, primary_color2],
+            #             length=length, start=start_time, queuename=f"fastpulse{i}", scale_dimmer="both"))
+            #     elif current_chaser == "SideToSide":
+            #         queues.append(self.side_to_side(
+            #             name, show, color1=primary_color1, color2=primary_color2,
+            #             length=length, start=start_time, queuename=f"sidetoside{i}", scale_dimmer="both"))
+            # else:
+            #     queues.append(self.simple_color(
+            #         name, show, color=idle_colour, dimmer=255, length=length, 
+            #         start=start_time, queuename=f"color{i}", scale_dimmer="both"))
+
+            strobe_ranges = onset_parts
 
             segment_queue, segment_dimmers = self.combine(
                 queues,
+                start_time=start_time,
                 end_time=end_time,
                 strobe_ranges=strobe_ranges,
             )
             light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]
-            segment_dimmers = self.scale_dimmer_with_envelope(segment_dimmers, light_strength_envelope)
+            segment_dimmers = self.scale_dimmer_with_envelope(segment_dimmers, light_strength_envelope, strobe_ranges=strobe_ranges)
 
             # OLA scripts
             ola_scripts.append(segment_queue)
             ola_scripts.append(segment_dimmers)
 
             # QLC+ scripts (queue and dimmer, lag scaling only on dimmer)
-            qlc_scripts.append(self.convert_scripts_to_qlc_format([segment_queue], qlc_delay=qlc_delay, qlc_lag=1.0, is_dimmer=False)[0])
-            qlc_scripts.append(self.convert_scripts_to_qlc_format([segment_dimmers], qlc_delay=qlc_delay, qlc_lag=qlc_lag, is_dimmer=True)[0])
+            # qlc_scripts.append(self.convert_scripts_to_qlc_format([segment_queue], qlc_delay=qlc_delay, qlc_lag=1.0, is_dimmer=False)[0])
+            # qlc_scripts.append(self.convert_scripts_to_qlc_format([segment_dimmers], qlc_delay=qlc_delay, qlc_lag=qlc_lag, is_dimmer=True)[0])
 
             function_names.append(str(segments[i]["start"]))
             function_names.append(str(segments[i]["start"]) + "_dimmers")
@@ -1528,13 +1515,23 @@ class ShowStructurer:
         }
         return result
     
-    def scale_dimmer_with_envelope(self, segment_dimmers, light_strength_envelope):
+    def scale_dimmer_with_envelope(self, segment_dimmers, light_strength_envelope, strobe_ranges=None):
         """
         Per-command envelope scaling with synthetic updates during waits.
         Flags: both → beat_flow_ranges (source 0=beat,1=flow,2=snare), beat, flow, snare. None → no scaling.
         """
         if not segment_dimmers:
             return segment_dimmers
+
+        # Helper: suppress ANY emitted dimmer changes during strobes
+        def _in_strobe(abs_ms: int) -> bool:
+            if not strobe_ranges:
+                return False
+            try:
+                _entering, in_range, _exiting, _wt, _sr = self.check_strobe_ranges(int(abs_ms), 0, strobe_ranges)
+                return bool(in_range)
+            except Exception:
+                return False
 
         env = light_strength_envelope or {}
         beat_env = env.get("beat") or {}
@@ -1653,7 +1650,8 @@ class ShowStructurer:
         flagged = {}  # (fixture_id, channel) -> {"base": int, "flag": str}
 
         scaled = []
-        seg_ms = 0
+        seg_ms = 0          # segment-local time (starts after the first alignment wait)
+        abs_ms = 0          # absolute time reconstructed from all waits (including the first)
         saw_first_wait = False
         update_frequency_ms = max(1, int(getattr(self, "dimmer_update_fq", 33)))
 
@@ -1664,10 +1662,11 @@ class ShowStructurer:
                     scaled.append(0)
                     continue
 
-                # First wait: pass-through to align segment start
+                # First wait is the alignment wait (absolute start offset). Keep it, and advance absolute time.
                 if not saw_first_wait:
                     saw_first_wait = True
                     scaled.append(wait_ms)
+                    abs_ms += wait_ms
                     continue
 
                 end_ms = seg_ms + wait_ms
@@ -1675,8 +1674,13 @@ class ShowStructurer:
                     delta = min(update_frequency_ms, end_ms - seg_ms)
                     scaled.append(int(delta))
                     seg_ms += delta
+                    abs_ms += delta
 
-                    # Synthetic scaled snapshot for all flagged fixtures active at this time
+                    # Synthetic scaled snapshot for all flagged fixtures active at this time,
+                    # BUT NEVER during strobe ranges.
+                    if _in_strobe(abs_ms):
+                        continue
+
                     batch = []
                     for (fx, ch), info in flagged.items():
                         fn = _fn_for_flag_at_time(info["flag"], seg_ms)
@@ -1688,16 +1692,20 @@ class ShowStructurer:
                         scaled.append(batch)
                 continue
 
+            # For non-wait entries, suppress EMISSION during strobes, but still update tracking
+            # so the envelope resumes correctly after the strobe.
             if isinstance(entry, tuple) and len(entry) >= 3:
                 fixture_id, channel, value = int(entry[0]), int(entry[1]), int(entry[2])
                 flag = entry[3] if len(entry) >= 4 else None
-                # Update tracking if this command carries a scale flag
+
                 if flag:
                     flagged[(fixture_id, channel)] = {"base": int(value), "flag": str(flag).lower()}
                 else:
-                    # If no flag, update base only if this fixture is already flagged (preserve current flag)
                     if (fixture_id, channel) in flagged:
                         flagged[(fixture_id, channel)]["base"] = int(value)
+
+                if _in_strobe(abs_ms):
+                    continue
 
                 fn = _fn_for_flag_at_time(flag, seg_ms) if flag else None
                 new_val = _scale_value(int(value), seg_ms, fn)
@@ -1705,26 +1713,36 @@ class ShowStructurer:
                 continue
 
             if isinstance(entry, list):
+                # Update tracking for all items, but skip emitting the batch if in strobe
                 batch_out = []
                 seen = set()
+
                 for sub in entry:
                     if isinstance(sub, tuple) and len(sub) >= 3:
                         fixture_id, channel, value = int(sub[0]), int(sub[1]), int(sub[2])
                         flag = sub[3] if len(sub) >= 4 else None
+
                         if flag:
                             flagged[(fixture_id, channel)] = {"base": int(value), "flag": str(flag).lower()}
                         else:
                             if (fixture_id, channel) in flagged:
                                 flagged[(fixture_id, channel)]["base"] = int(value)
-                        fn = _fn_for_flag_at_time(flag, seg_ms) if flag else None
-                        new_val = _scale_value(int(value), seg_ms, fn)
-                        batch_out.append((fixture_id, channel, new_val, flag))
-                        seen.add((fixture_id, channel))
+
+                        if not _in_strobe(abs_ms):
+                            fn = _fn_for_flag_at_time(flag, seg_ms) if flag else None
+                            new_val = _scale_value(int(value), seg_ms, fn)
+                            batch_out.append((fixture_id, channel, new_val, flag))
+                            seen.add((fixture_id, channel))
                     else:
-                        batch_out.append(sub)
+                        if not _in_strobe(abs_ms):
+                            batch_out.append(sub)
+
+                if _in_strobe(abs_ms):
+                    continue
+
                 scaled.append(batch_out)
 
-                # Inject synthetic scaled snapshot for flagged fixtures not in this batch
+                # Inject synthetic scaled snapshot for flagged fixtures not in this batch (also gated)
                 synth = []
                 for (fx, ch), info in flagged.items():
                     if (fx, ch) in seen:
@@ -1738,7 +1756,9 @@ class ShowStructurer:
                     scaled.append(synth)
                 continue
 
-            # Passthrough for unknown types
+            # Passthrough for unknown types (but suppress during strobes)
+            if _in_strobe(abs_ms):
+                continue
             scaled.append(entry)
 
         return scaled
