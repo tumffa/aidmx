@@ -1295,31 +1295,64 @@ class ShowStructurer:
     
     def segment_strobe_ranges(self, segment_start, segment_end, strobe_ranges):
         """
-        Returns strobe ranges clipped to the segment and converted to segment-local seconds.
-        Args:
-            segment_start (float): Segment start time in seconds (song-absolute).
-            segment_end   (float): Segment end time in seconds (song-absolute).
-            strobe_ranges (list): List of (start, end) tuples in seconds, song-absolute.
-        Returns:
-            List of (start, end) tuples in seconds, segment-local (0..segment_length).
+        Clip song-absolute strobes to [segment_start, segment_end], convert to segment-local seconds,
+        and normalize (drop sub-1ms windows, sort, merge overlaps/adjacents).
+        Returns list of (start_s, end_s) in segment-local seconds.
         """
-        result = []
-        for r in strobe_ranges or []:
+        if not strobe_ranges:
+            return []
+
+        seg_start = float(segment_start)
+        seg_end = float(segment_end)
+        if seg_end <= seg_start:
+            return []
+
+        # Clip to segment and convert to local seconds
+        clipped = []
+        for r in strobe_ranges:
             if not isinstance(r, (tuple, list)) or len(r) < 2:
                 continue
-            s_abs, e_abs = float(r[0]), float(r[1])
+            try:
+                s_abs = float(r[0]); e_abs = float(r[1])
+            except Exception:
+                continue
+            if e_abs <= s_abs:
+                continue
+            # overlap?
+            if e_abs <= seg_start or s_abs >= seg_end:
+                continue
+            cs = max(s_abs, seg_start)
+            ce = min(e_abs, seg_end)
+            if ce <= cs:
+                continue
+            # convert to segment-local seconds
+            start_rel = cs - seg_start
+            end_rel = ce - seg_start
+            clipped.append((start_rel, end_rel))
 
-            # Overlap with segment bounds?
-            if e_abs > segment_start and s_abs < segment_end:
-                # Clip to segment
-                clipped_start_abs = max(s_abs, segment_start)
-                clipped_end_abs = min(e_abs, segment_end)
-                if clipped_end_abs > clipped_start_abs:
-                    # Convert to segment-local seconds
-                    start_rel = clipped_start_abs - segment_start
-                    end_rel = clipped_end_abs - segment_start
-                    result.append((start_rel, end_rel))
-        return result
+        if not clipped:
+            return []
+
+        # Drop near-zero ranges (<1 ms), sort and merge
+        EPS_S = 0.001  # 1 ms
+        clipped = [(s, e) for (s, e) in clipped if (e - s) >= EPS_S]
+        if not clipped:
+            return []
+
+        clipped.sort(key=lambda x: x[0])
+
+        merged = []
+        cs, ce = clipped[0]
+        for s, e in clipped[1:]:
+            # merge overlaps or adjacency within EPS_S
+            if s <= ce + EPS_S:
+                ce = max(ce, e)
+            else:
+                merged.append((cs, ce))
+                cs, ce = s, e
+        merged.append((cs, ce))
+
+        return merged
 
     def check_strobe_ranges(self, current_time_ms, wait_time, strobe_ranges):
         """
