@@ -56,11 +56,27 @@ class Chaser:
         positions: List[int] = [0 for _ in seqs]
         combined: List[Any] = []
 
+        # Helper: append command(s) flattening any list entries
+        def append_flat(entry: Any) -> None:
+            nonlocal combined
+            if isinstance(entry, list):
+                for sub in entry:
+                    if isinstance(sub, int):
+                        # unexpected, but keep consistent
+                        combined.append(int(sub))
+                    else:
+                        combined.append(tuple(sub))
+            elif isinstance(entry, tuple):
+                combined.append(entry)
+            else:
+                # fallback
+                combined.append(entry)
+
         # Helper: emit consecutive commands from a sequence starting at current position
         def emit_commands(idx: int) -> None:
             nonlocal combined
             while positions[idx] < len(seqs[idx]) and not isinstance(seqs[idx][positions[idx]], int):
-                combined.append(seqs[idx][positions[idx]])
+                append_flat(seqs[idx][positions[idx]])
                 positions[idx] += 1
 
         # Step 1: emit leading commands from each sequence
@@ -124,13 +140,31 @@ class Chaser:
         output: List[Any] = []
         pending: List[List[Any]] = []
 
+        # Helper to flatten a sequence: convert any list entries into standalone tuples
+        def flatten_seq(seq: List[Any]) -> List[Any]:
+            flat: List[Any] = []
+            for entry in seq:
+                if isinstance(entry, int):
+                    flat.append(int(entry))
+                elif isinstance(entry, list):
+                    for sub in entry:
+                        if isinstance(sub, int):
+                            flat.append(int(sub))
+                        else:
+                            flat.append(tuple(sub))
+                elif isinstance(entry, tuple):
+                    flat.append(entry)
+                else:
+                    flat.append(entry)
+            return flat
+
         def flush_pending():
             nonlocal output, pending
             if not pending:
                 return
             if len(pending) == 1:
-                # Append the entire precompiled pattern as-is
-                output.extend(pending[0])
+                # Append the entire precompiled pattern as-is (flattened)
+                output.extend(flatten_seq(pending[0]))
             else:
                 # Combine consecutive patterns and append the combined list
                 combined = self._combine_sequences(pending)
