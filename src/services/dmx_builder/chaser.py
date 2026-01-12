@@ -245,7 +245,7 @@ def strobe(universe, interval=500, length=None):
     ch = Chaser(name="StrobeChaser", default_interval=interval)
 
     initialise = FixturePattern(name="StrobeInitialise")
-    initialise.define_pattern([("dimmer", 0), ("shutter", "closed")])
+    initialise.define_pattern([("dimmer", 0), ("shutter", "closed"), ("rgb", "white")])
     for i in range(1, 5):
         fixture = fixtures[str(i)]
         ch.add_pattern(initialise, fixture, interval=interval, scale_dimmer=None)

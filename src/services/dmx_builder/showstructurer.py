@@ -1070,7 +1070,7 @@ class ShowStructurer:
         result["queue"] = colorpulse_queue
         return result
     
-    def combine(self, queues, start_time=None, end_time=None, seperate_dimmer=True, strobe_ranges=None):
+    def combine(self, queues, length=None, seperate_dimmer=True, strobe_ranges=None):
         """
         Combines multiple chaser-compiled scripts (plain lists) into a single sequence per time segment.
 
@@ -1097,23 +1097,12 @@ class ShowStructurer:
                 elif "queue" in q and hasattr(q["queue"], "get_queue"):
                     scripts.append(_queue_to_list(q["queue"]))
 
-        # Prepend start_time to each script if provided (absolute timeline alignment)
-        segment_start_abs_ms = None
-        if start_time is not None:
-            try:
-                segment_start_abs_ms = int(round(float(start_time)))
-            except Exception:
-                segment_start_abs_ms = 0
-            scripts = [[segment_start_abs_ms] + (s or []) for s in scripts]
-        else:
-            segment_start_abs_ms = 0
-
         segment = []
         segment_dimmers = []
         fixture_dimmers = {}
 
-        if end_time is None:
-            end_time = float("inf")
+        if length is None:
+            length = float("inf")
         current_time_ms = 0  # absolute song timeline (because of the prepended start wait)
 
         def _event_iter(script):
@@ -1145,10 +1134,9 @@ class ShowStructurer:
                 continue
             states.append({"iter": it, "next_wait": w, "pending": cmds})
 
-        while states and current_time_ms < end_time:
+        while states and current_time_ms < length:
             min_wait = min(max(0, int(round(float(st["next_wait"])))) for st in states)
 
-            # current_time_ms is already on the absolute timeline because we prepend start_time
             if strobe_ranges:
                 entering_strobe_range, in_strobe_range, exiting_strobe_range, wait_time_till_strobe, strobe_range = \
                     self.check_strobe_ranges(current_time_ms, min_wait, strobe_ranges)
@@ -1164,6 +1152,12 @@ class ShowStructurer:
                 advance_ms = wait_time_till_strobe
             if in_strobe_range and exiting_strobe_range:
                 advance_ms = wait_time_till_strobe + 1
+            # NEW: if we are inside a strobe range and min_wait==0 (back-to-back commands),
+            # advance the timeline to the end of the strobe range to avoid stalling.
+            if in_strobe_range and not exiting_strobe_range and advance_ms == 0 and strobe_range is not None:
+                current_time_sec = float(current_time_ms) / 1000.0
+                ms_to_end = max(1, int(round((float(strobe_range[1]) - current_time_sec) * 1000.0)))
+                advance_ms = ms_to_end
 
             if advance_ms > 0:
                 segment.append(self._wait(advance_ms))
@@ -1271,16 +1265,12 @@ class ShowStructurer:
             current_time_sec = float(current_time_ms) / 1000.0
             end_time_sec = current_time_sec + (float(wait_time) / 1000.0)
 
-            # Normalize ranges to seconds
             norm = []
             for r in strobe_ranges:
                 if not isinstance(r, (list, tuple)) or len(r) < 2:
                     continue
                 s = r[0]; e = r[1]
-                if s is None or e is None:
-                    continue
-                if e > s:
-                    norm.append((s, e))
+                norm.append((s, e))
 
             # In range: [start, end)
             for start, end in norm:
@@ -1323,8 +1313,12 @@ class ShowStructurer:
         for fixture_id, info in fixture_dimmers.items():
             for channel, value in info.items():
                 if channel == self.fixture_dimmer_map.get(fixture_id, None):
-                    dimmer_command = self._setfixture(fixture_id, channel, value, 
-                                                        f"Restoring original value {value}")
+                    # Ensure restored dimmers keep scaling enabled
+                    dimmer_command = self._setfixture(
+                        fixture_id, channel, value,
+                        comment=f"Restoring original value {value}",
+                        scale_dimmer="both"
+                    )
                     segment_dimmers.append(dimmer_command)
                 else:
                     cmd = self._setfixture(fixture_id, channel, value)
@@ -1409,6 +1403,7 @@ class ShowStructurer:
             for part in onset_parts:
                 start = part[0]*1000
                 end = part[1]*1000
+                length = (end - start)
 
                 strobe = _construct_strobe(
                     universe=self.universe,
@@ -1416,13 +1411,13 @@ class ShowStructurer:
                     length=(end - start)
                 )
 
-                scripts, dimmers = self.combine(
+                scripts, _ = self.combine(
                     [strobe],
-                    start_time=start,
-                    end_time=end,
+                    length=length,
                     seperate_dimmer=False,
                     strobe_ranges=None
                 )
+                scripts.insert(0, self._wait(start))
                 ola_scripts.append(scripts)
 
         # Add scripts for each segment in the song
@@ -1443,7 +1438,7 @@ class ShowStructurer:
         for i in range(i, len(segments)):
             start_time = segments[i]["start"]*1000
             end_time = segments[i]["end"]*1000
-            length = (segments[i]["end"] - segments[i]["start"])*1000
+            length = (end_time - start_time)
             queues = []
 
             queues.append(_construct_queue_chaser(
@@ -1486,12 +1481,16 @@ class ShowStructurer:
 
             segment_queue, segment_dimmers = self.combine(
                 queues,
-                start_time=start_time,
-                end_time=end_time,
+                length=length,
                 strobe_ranges=strobe_ranges,
             )
             light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]
-            segment_dimmers = self.scale_dimmer_with_envelope(segment_dimmers, light_strength_envelope, strobe_ranges=strobe_ranges)
+            segment_dimmers = self.scale_dimmer_with_envelope(start_time, segment_dimmers, light_strength_envelope, strobe_ranges=strobe_ranges)
+
+            # Add start time wait to script first index
+            if start_time > 0:
+                segment_queue.insert(0, self._wait(start_time))
+                segment_dimmers.insert(0, self._wait(start_time))
 
             # OLA scripts
             ola_scripts.append(segment_queue)
@@ -1515,7 +1514,7 @@ class ShowStructurer:
         }
         return result
     
-    def scale_dimmer_with_envelope(self, segment_dimmers, light_strength_envelope, strobe_ranges=None):
+    def scale_dimmer_with_envelope(self, start_ms, segment_dimmers, light_strength_envelope, strobe_ranges=None):
         """
         Per-command envelope scaling with synthetic updates during waits.
         Flags: both → beat_flow_ranges (source 0=beat,1=flow,2=snare), beat, flow, snare. None → no scaling.
@@ -1651,8 +1650,7 @@ class ShowStructurer:
 
         scaled = []
         seg_ms = 0          # segment-local time (starts after the first alignment wait)
-        abs_ms = 0          # absolute time reconstructed from all waits (including the first)
-        saw_first_wait = False
+        abs_ms = start_ms
         update_frequency_ms = max(1, int(getattr(self, "dimmer_update_fq", 33)))
 
         for entry in segment_dimmers:
@@ -1660,13 +1658,6 @@ class ShowStructurer:
                 wait_ms = max(0, int(round(float(entry))))
                 if wait_ms == 0:
                     scaled.append(0)
-                    continue
-
-                # First wait is the alignment wait (absolute start offset). Keep it, and advance absolute time.
-                if not saw_first_wait:
-                    saw_first_wait = True
-                    scaled.append(wait_ms)
-                    abs_ms += wait_ms
                     continue
 
                 end_ms = seg_ms + wait_ms
