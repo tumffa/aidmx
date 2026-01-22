@@ -23,7 +23,7 @@ DM on discord if you have questions @ ```_tume_```
 ### Full song chaser and strobe demo
 [![Showcase Video (old version)](https://img.youtube.com/vi/g-IZg1kFES4/0.jpg)](https://youtu.be/g-IZg1kFES4?si=bYKBismXbn0RaHIn)
 
-## Installation Linux (Python 3.10)
+## Installation Linux
 
 1. Install PyTorch, Natten, and rest of dependencies:
     - PyTorch:
