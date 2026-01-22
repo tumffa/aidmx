@@ -25,11 +25,24 @@ DM on discord if you have questions @ ```_tume_```
 
 ## Installation Linux (Python 3.10)
 
-1. Install dependencies:
+1. Install PyTorch, Natten, and rest of dependencies:
+    - PyTorch:
+    ```
+    pip install -f https://download.pytorch.org/whl/cu121 torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2
+    ```
+    - Natten:
+    ```
+    # Get python version:
+    PYVER=$(python3 -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
+    
+    # Install natten wheel
+    pip install "https://github.com/SHI-Labs/NATTEN/releases/download/v0.15.0/natten-0.15.0+torch210cu121-cp${PYVER}-cp${PYVER}-linux_x86_64.whl"
+    ```
+     - Rest of dependencies:
     ```
     pip3 install -r requirements.txt
     ```
-2. Install ola and ola-python (skip if you do not intend to use OLA):
+3. Install ola and ola-python (skip if you do not intend to use OLA):
     ```
     sudo apt install ola ola-python
     ```
