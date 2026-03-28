@@ -18,6 +18,7 @@
         "colortype": "seperate",
         "dimmer": 3,
         "id": 1,
+        "qlc_id": 1,
         "nicestrobe": 250,
         "shutter": 4,
         "shutters": {
@@ -39,6 +40,7 @@
         "colortype": "seperate",
         "dimmer": 3,
         "id": 2,
+        "qlc_id": 2,
         "nicestrobe": 250,
         "shutter": 4,
         "shutters": {
@@ -60,6 +62,7 @@
         "colortype": "seperate",
         "dimmer": 3,
         "id": 3,
+        "qlc_id": 3,
         "nicestrobe": 250,
         "shutter": 4,
         "shutters": {
@@ -81,6 +84,7 @@
         "colortype": "seperate",
         "dimmer": 3,
         "id": 4,
+        "qlc_id": 4,
         "nicestrobe": 250,
         "shutter": 4,
         "shutters": {
@@ -104,6 +108,7 @@
         "colortype": "seperate",
         "dimmer": 0,
         "id": 0,
+        "qlc_id": 0,
         "nicestrobe": 211,
         "shutter": 1,
         "shutters": {
@@ -126,6 +131,7 @@
         "colortype": "seperate",
         "dimmer": 0,
         "id": 5,
+        "qlc_id": 5,
         "nicestrobe": 211,
         "shutter": 1,
         "shutters": {
