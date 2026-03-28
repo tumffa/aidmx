@@ -71,6 +71,21 @@ class FixturePattern:
         Returns a list shaped like: [wait, cmd, wait, cmd, ...], starting with 0 and
         issuing step-wise value changes until val2 is reached. If mapping fails, returns [].
         """
+        # Handle wheel colortype: instant transition after waiting the full time
+        if str(target).lower() == "rgb" and fixture.get("colortype") == "wheel":
+            # For wheel type, we wait the full transition time then instantly switch
+            c1 = self._compile_for_fixture(fixture, (target, val1), scale_dimmer)
+            c2 = self._compile_for_fixture(fixture, (target, val2), scale_dimmer)
+            if c1 is None and c2 is None:
+                return []
+            seq: List[Any] = []
+            if c1 is not None:
+                seq.extend([0, c1])
+            if c2 is not None:
+                wait_time = max(1, int(round(total_ms)))
+                seq.extend([wait_time, c2])
+            return seq if seq else []
+
         # RGB transitions for separate RGB fixtures
         if str(target).lower() == "rgb" and fixture.get("colortype") == "seperate":
             # Resolve start/end RGB values
@@ -140,6 +155,46 @@ class FixturePattern:
             if not seqs:
                 return []
             return self._combine_sequences(seqs)
+
+        # For dimmer, interpolate in percentage space (val1, val2 are percentages)
+        # to avoid double-conversion through dimmerrange
+        if str(target).lower() == "dimmer":
+            c1 = self._compile_for_fixture(fixture, (target, val1), scale_dimmer)
+            c2 = self._compile_for_fixture(fixture, (target, val2), scale_dimmer)
+            if c1 is None or c2 is None:
+                return []
+            
+            # val1 and val2 are percentages (0-100)
+            pct_start = float(val1)
+            pct_end = float(val2)
+            
+            if total_ms <= 1 or pct_start == pct_end:
+                return [0, c1, max(1, int(round(total_ms))), c2]
+            
+            delta_pct = pct_end - pct_start
+            
+            # Choose steps based on percentage change
+            min_wait_ms = 33
+            steps_by_time = max(1, int(total_ms // min_wait_ms))
+            # Use ~5% increments for smooth dimmer fades
+            increment_pct = 5
+            steps_by_value = max(1, int(math.ceil(abs(delta_pct) / float(increment_pct))))
+            steps = max(1, min(steps_by_time, steps_by_value))
+            
+            step_wait = max(1, int(round(total_ms / float(steps))))
+            
+            seq: List[Any] = [0, c1]
+            for i in range(1, steps + 1):
+                if i < steps:
+                    pct_i = pct_start + delta_pct * (i / float(steps))
+                else:
+                    pct_i = pct_end
+                cmd_i = self._compile_for_fixture(fixture, (target, pct_i), scale_dimmer)
+                if cmd_i is not None:
+                    seq.append(step_wait)
+                    seq.append(cmd_i)
+            
+            return seq
 
         c1 = self._compile_for_fixture(fixture, (target, val1), scale_dimmer)
         c2 = self._compile_for_fixture(fixture, (target, val2), scale_dimmer)
@@ -380,18 +435,18 @@ class FixturePattern:
     def _percent_to_dimmer_value(self, fixture: Dict[str, Any], percent: Union[int, float]) -> int:
         """
         Convert a dimmer percentage (0-100) to raw DMX value using the fixture's
-        dimmer_range. Defaults to [0, 255] if not specified.
+        dimmerrange. Defaults to [0, 255] if not specified.
         
         Args:
-            fixture: Fixture dictionary that may contain 'dimmer_range' key.
+            fixture: Fixture dictionary that may contain 'dimmerrange' key.
             percent: Dimmer percentage from 0 to 100.
         
         Returns:
             Raw DMX value as an integer.
         """
-        dimmer_range = fixture.get("dimmer_range", [0, 255])
-        if isinstance(dimmer_range, (list, tuple)) and len(dimmer_range) >= 2:
-            min_val, max_val = int(dimmer_range[0]), int(dimmer_range[1])
+        dimmerrange = fixture.get("dimmerrange", [0, 255])
+        if isinstance(dimmerrange, (list, tuple)) and len(dimmerrange) >= 2:
+            min_val, max_val = int(dimmerrange[0]), int(dimmerrange[1])
         else:
             min_val, max_val = 0, 255
         
@@ -427,7 +482,7 @@ class FixturePattern:
         if tgt == "dimmer":
             chan = fixture.get("dimmer")
             if chan is not None:
-                # Convert percentage (0-100) to raw DMX value using dimmer_range
+                # Convert percentage (0-100) to raw DMX value using dimmerrange
                 raw_value = self._percent_to_dimmer_value(fixture, value)
                 return self._setfixture(fixture["id"], chan, raw_value, scale_dimmer)
             return None
@@ -435,7 +490,25 @@ class FixturePattern:
         if tgt == "rgb":
             colortype = fixture.get("colortype")
             cc = fixture.get("colorchannels", {}) or {}
-            if colortype == "single":
+            if colortype == "wheel":
+                # Wheel colortype: colorchannels is the channel number,
+                # colorvalues maps color names to DMX values
+                # e.g., colorchannels: 5, colorvalues: {"red": 10, "blue": 50, "white": 0}
+                color_chan = fixture.get("colorchannels")
+                if color_chan is None:
+                    return None
+                colorvalues = fixture.get("colorvalues", {}) or {}
+                if isinstance(value, str):
+                    color_key = value.lower()
+                    wheel_val = colorvalues.get(color_key)
+                    if wheel_val is None:
+                        return None
+                    return self._setfixture(fixture["id"], int(color_chan), int(wheel_val))
+                elif isinstance(value, int):
+                    # Direct DMX value for wheel
+                    return self._setfixture(fixture["id"], int(color_chan), int(value))
+                return None
+            elif colortype == "single":
                 # Support wheel-style single color channel via string name or int value
                 cch_main = cc.get("single")
                 if cch_main is None:
@@ -456,7 +529,7 @@ class FixturePattern:
                     return self._setfixture(fixture["id"], cch_main, int(value))
                 # tuple for single wheel not supported as single command
                 return None
-            else:
+            elif colortype == "seperate":
                 # 'seperate' RGB: allow single-channel update via (channel_name, value)
                 if isinstance(value, tuple) and len(value) == 2 and isinstance(value[0], str):
                     ch_name, v = value[0].lower(), value[1]
@@ -471,6 +544,8 @@ class FixturePattern:
                     return self._setfixture(fixture["id"], int(ch), int(v))
                 # other rgb value types are not single-channel commands
                 return None
+            # Unknown colortype - return None gracefully
+            return None
 
         if tgt == "shutter":
             chan = fixture.get("shutter")

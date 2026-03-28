@@ -45,7 +45,7 @@ class ThreadSafeLog:
             next_cursor = data[-1][0] if data else cursor
             return data, next_cursor
 
-def create_app():
+def create_app(config_path: str = "config.json"):
     app = Flask(
         __name__,
         static_folder=str((Path(__file__).resolve().parents[1] / "web" / "dist")),
@@ -58,7 +58,7 @@ def create_app():
     logging.getLogger("flask.app").disabled = True
 
     # Shared services
-    cfg_path = Path("config.json")
+    cfg_path = Path(config_path)
     config = load_config(cfg_path)
     setup_path = Path(config["setup_path"]).resolve()
     setupfile_name = setup_path.stem
@@ -214,6 +214,7 @@ def create_app():
 
 
 if __name__ == "__main__":
-    app = create_app()
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "config.json"
+    app = create_app(config_path)
     # Disable debug and reloader to avoid extra console noise
     app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)

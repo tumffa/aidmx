@@ -10,8 +10,8 @@ def load_config(config_path="config.json"):
         config = json.load(f)
     return config
 
-def main(audio_name, strobe=False, simple=False, qlc_delay=1, qlc_lag=0.8955):
-    config = load_config()
+def main(audio_name, strobe=False, simple=False, qlc_delay=1, qlc_lag=0.8955, config_path="config.json"):
+    config = load_config(config_path)
     setup_path = Path(config["setup_path"])
     setupfile_name = setup_path.stem
     data_manager = DataManager(config)
@@ -26,5 +26,6 @@ if __name__ == "__main__":
     parser.add_argument("-si", "-m", action="store_true", help="Enable simple mode")
     parser.add_argument("-d", "-d", type=float, default=1, help="Delay in seconds before show start to allow for i.e. song track command to begin (default: 1 sec)")
     parser.add_argument("-l", "-l", type=float, default=0.8955, help="Scaling factor for wait times to compensate for QLC+ lag (default: 0.8955)")
+    parser.add_argument("-c", "--config", type=str, default="config.json", help="Path to config file (default: config.json)")
     args = parser.parse_args()
-    main(args.audio_name, strobe=args.st, simple=args.si, qlc_delay=args.d, qlc_lag=args.l)
+    main(args.audio_name, strobe=args.st, simple=args.si, qlc_delay=args.d, qlc_lag=args.l, config_path=args.config)

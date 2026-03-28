@@ -14,12 +14,19 @@ class ShowStructurer:
         # and fixture address map
         self.fixture_addresses = {}
         self.fixture_dimmer_map = {}
+        self.fixture_dimmerrange = {}  # Maps fixture_id to (min, max) dimmer range
         for group_name, group in self.universe.items():
             for fixture_key, fixture in group.items():
                 fixture_id = fixture["id"]
                 self.fixture_addresses[fixture_id] = fixture["address"]
                 dimmer_channel = fixture["dimmer"]
                 self.fixture_dimmer_map[fixture_id] = dimmer_channel
+                # Store dimmerrange (default [0, 255] if not specified)
+                dimmerrange = fixture.get("dimmerrange", [0, 255])
+                if isinstance(dimmerrange, (list, tuple)) and len(dimmerrange) >= 2:
+                    self.fixture_dimmerrange[fixture_id] = (int(dimmerrange[0]), int(dimmerrange[1]))
+                else:
+                    self.fixture_dimmerrange[fixture_id] = (0, 255)
 
         self.dimmer_update_fq = 33 # ms
 
@@ -1580,12 +1587,16 @@ class ShowStructurer:
                 return flow_fn if src == 1 else snare_fn if src == 2 else beat_fn
             return None
 
-        def _scale_value(value, t_ms, fn):
+        def _scale_value(value, t_ms, fn, fixture_id=None):
             if fn is None:
                 return value
             t_sec = t_ms / 1000.0
             strength = float(fn(t_sec))
-            return max(0, min(255, int(round(float(value) * strength))))
+            # Scale within dimmerrange bounds: min + (value - min) * strength
+            # This ensures envelope=0 gives min (not 0), and envelope=1 gives original value
+            min_val, max_val = self.fixture_dimmerrange.get(fixture_id, (0, 255))
+            scaled = min_val + (float(value) - min_val) * strength
+            return max(0, min(255, int(round(scaled))))
 
         # Track per-fixture last original value and selected flag
         flagged = {}  # (fixture_id, channel) -> {"base": int, "flag": str}
@@ -1618,7 +1629,7 @@ class ShowStructurer:
                         fn = _fn_for_flag_at_time(info["flag"], seg_ms)
                         if fn is None:
                             continue
-                        val = _scale_value(info["base"], seg_ms, fn)
+                        val = _scale_value(info["base"], seg_ms, fn, fixture_id=fx)
                         batch.append((int(fx), int(ch), int(val), info["flag"]))
                     if batch:
                         scaled.append(batch)
@@ -1640,7 +1651,7 @@ class ShowStructurer:
                     continue
 
                 fn = _fn_for_flag_at_time(flag, seg_ms) if flag else None
-                new_val = _scale_value(int(value), seg_ms, fn)
+                new_val = _scale_value(int(value), seg_ms, fn, fixture_id=fixture_id)
                 scaled.append((fixture_id, channel, new_val, flag))
                 continue
 
@@ -1662,7 +1673,7 @@ class ShowStructurer:
 
                         if not _in_strobe(abs_ms):
                             fn = _fn_for_flag_at_time(flag, seg_ms) if flag else None
-                            new_val = _scale_value(int(value), seg_ms, fn)
+                            new_val = _scale_value(int(value), seg_ms, fn, fixture_id=fixture_id)
                             batch_out.append((fixture_id, channel, new_val, flag))
                             seen.add((fixture_id, channel))
                     else:
@@ -1682,7 +1693,7 @@ class ShowStructurer:
                     fn = _fn_for_flag_at_time(info["flag"], seg_ms)
                     if fn is None:
                         continue
-                    val = _scale_value(info["base"], seg_ms, fn)
+                    val = _scale_value(info["base"], seg_ms, fn, fixture_id=fx)
                     synth.append((int(fx), int(ch), int(val), info["flag"]))
                 if synth:
                     scaled.append(synth)

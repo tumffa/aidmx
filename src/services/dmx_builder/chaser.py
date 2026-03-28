@@ -268,8 +268,8 @@ def color_pulse(universe, interval, length=None):
     ch = Chaser(name="ColorPulseChaser", default_interval=interval)
     ch.add_pattern(fp, fixtures["1"], interval=interval, scale_dimmer="both")
     ch.add_pattern(fp, fixtures["2"], interval=interval, scale_dimmer="both")
-    ch.add_pattern(fp, fixtures["3"], interval=interval, scale_dimmer="both")
-    ch.add_pattern(fp, fixtures["4"], interval=interval, scale_dimmer="both")
+    # ch.add_pattern(fp, fixtures["3"], interval=interval, scale_dimmer="both")
+    # ch.add_pattern(fp, fixtures["4"], interval=interval, scale_dimmer="both")
 
     return ch.compile(length=length)
 
