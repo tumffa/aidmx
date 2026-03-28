@@ -8,20 +8,136 @@
   "universe": {
     "size": 32,
     "abovewash": {
-      "1": {"id": 1, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250, "address": 7},
-      "2": {"id": 2, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250, "address": 12},
-      "3": {"id": 3, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250, "address": 17},
-      "4": {"id": 4, "dimmer": 3, "colortype": "seperate", "colorchannels": {"red": 0, "green": 1, "blue": 2}, "strobe": 4, "stroberange": [20, 255],
-                    "shutter": 4, "shutters": {"open": 0}, "nicestrobe": 250, "address": 22}
+      "1": {
+        "address": 7,
+        "colorchannels": {
+          "blue": 2,
+          "green": 1,
+          "red": 0
+        },
+        "colortype": "seperate",
+        "dimmer": 3,
+        "id": 1,
+        "nicestrobe": 250,
+        "shutter": 4,
+        "shutters": {
+          "open": 0
+        },
+        "strobe": 4,
+        "stroberange": [
+          20,
+          255
+        ]
+      },
+      "2": {
+        "address": 12,
+        "colorchannels": {
+          "blue": 2,
+          "green": 1,
+          "red": 0
+        },
+        "colortype": "seperate",
+        "dimmer": 3,
+        "id": 2,
+        "nicestrobe": 250,
+        "shutter": 4,
+        "shutters": {
+          "open": 0
+        },
+        "strobe": 4,
+        "stroberange": [
+          20,
+          255
+        ]
+      },
+      "3": {
+        "address": 17,
+        "colorchannels": {
+          "blue": 2,
+          "green": 1,
+          "red": 0
+        },
+        "colortype": "seperate",
+        "dimmer": 3,
+        "id": 3,
+        "nicestrobe": 250,
+        "shutter": 4,
+        "shutters": {
+          "open": 0
+        },
+        "strobe": 4,
+        "stroberange": [
+          20,
+          255
+        ]
+      },
+      "4": {
+        "address": 22,
+        "colorchannels": {
+          "blue": 2,
+          "green": 1,
+          "red": 0
+        },
+        "colortype": "seperate",
+        "dimmer": 3,
+        "id": 4,
+        "nicestrobe": 250,
+        "shutter": 4,
+        "shutters": {
+          "open": 0
+        },
+        "strobe": 4,
+        "stroberange": [
+          20,
+          255
+        ]
+      }
     },
     "strobe": {
-        "1": {"id": 0, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": [130, 249],
-                  "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211, "address": 1},
-        "2": {"id": 5, "dimmer": 0, "colortype": "seperate", "colorchannels": {"red": 2, "green": 3, "blue": 4}, "strobe": 1, "stroberange": [130, 249],
-                    "shutter": 1, "shutters": {"open": 0, "closed": 7}, "nicestrobe": 211, "address": 27}
+      "1": {
+        "address": 1,
+        "colorchannels": {
+          "blue": 4,
+          "green": 3,
+          "red": 2
+        },
+        "colortype": "seperate",
+        "dimmer": 0,
+        "id": 0,
+        "nicestrobe": 211,
+        "shutter": 1,
+        "shutters": {
+          "closed": 7,
+          "open": 0
+        },
+        "strobe": 1,
+        "stroberange": [
+          130,
+          249
+        ]
+      },
+      "2": {
+        "address": 27,
+        "colorchannels": {
+          "blue": 4,
+          "green": 3,
+          "red": 2
+        },
+        "colortype": "seperate",
+        "dimmer": 0,
+        "id": 5,
+        "nicestrobe": 211,
+        "shutter": 1,
+        "shutters": {
+          "closed": 7,
+          "open": 0
+        },
+        "strobe": 1,
+        "stroberange": [
+          130,
+          249
+        ]
+      }
     }
   }
 }

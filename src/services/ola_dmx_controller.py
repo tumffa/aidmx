@@ -3,6 +3,7 @@ from ola.ClientWrapper import ClientWrapper
 
 # Default universe
 UNIVERSE = 1
+# Global wrapper instance used during playback; allows external stop.
 wrapper = None
 
 # Compat wrapper for old ola-python expecting .tostring()
@@ -19,6 +20,23 @@ def DmxSent(state):
     if not state.Succeeded():
         print("Failed to send DMX")
         wrapper.Stop()
+
+def stop_current_playback():
+    """
+    Stop the currently running DMX playback, if any.
+    Safe to call even if nothing is playing.
+    """
+    global wrapper
+    try:
+        if wrapper is not None:
+            try:
+                wrapper.Stop()
+                print("--DMX playback stopped")
+            except Exception as e:
+                print(f"--Error stopping DMX: {e}")
+    except Exception:
+        # Defensive: ignore any unexpected issues
+        pass
 
 def play_dmx_sequence(frame_delays_ms, dmx_frames, universe=UNIVERSE):
     """
