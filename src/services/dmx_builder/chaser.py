@@ -259,7 +259,7 @@ def color_pulse(universe, interval, length=None):
 
     fp = FixturePattern(name="ColorPulse")
     fp.define_pattern([
-        ("dimmer", 255),
+        ("dimmer", 100),  # 100% = full brightness
         ("shutter", "open"),
         ("rgb", "red", ("green", 2)),
         ("rgb", "green", ("red", 2))
@@ -279,14 +279,14 @@ def strobe(universe, interval=500, length=None):
     ch = Chaser(name="StrobeChaser", default_interval=interval)
 
     initialise = FixturePattern(name="StrobeInitialise")
-    initialise.define_pattern([("dimmer", 0), ("shutter", "closed"), ("rgb", "white")])
+    initialise.define_pattern([("dimmer", 0), ("shutter", "closed"), ("rgb", "white")])  # 0% dimmer
     for i in range(1, 5):
         fixture = fixtures[str(i)]
         ch.add_pattern(initialise, fixture, interval=interval, scale_dimmer=None)
     ch.add_wait(0.0)
 
     fp = FixturePattern(name="StrobePattern")
-    fp.define_pattern([("strobe", "nicestrobe"), ("rgb", "white"), ("dimmer", 255), 0.1, ("shutter", "closed"), ("dimmer", 0)])
+    fp.define_pattern([("strobe", "nicestrobe"), ("rgb", "white"), ("dimmer", 100), 0.1, ("shutter", "closed"), ("dimmer", 0)])  # 100% and 0% dimmer
     steps = [0, 2, 1, 3, 2, 0, 3, 1]
     for step in steps:
         fixture = fixtures[str(step + 1)]

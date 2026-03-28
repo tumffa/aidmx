@@ -1174,8 +1174,6 @@ class ShowStructurer:
                         segment.append(cmds)
                     if dimmer_cmds:
                         segment_dimmers.append(dimmer_cmds)
-                else:
-                    print(f"----Skipping commands during strobe at {current_time_ms/1000}")
 
             # if we exited a strobe range, restore fixture states
             if exiting_strobe_range:
@@ -1352,6 +1350,9 @@ class ShowStructurer:
                 scripts.insert(0, self._wait(start))
                 ola_scripts.append(scripts)
 
+                qlc_scripts.append(self.convert_scripts_to_qlc_format([scripts], qlc_delay=qlc_delay, qlc_lag=qlc_lag, is_dimmer=False)[0])
+                function_names.append(f"strobe{part[0]}-{part[1]}")
+
         # Add scripts for each segment in the song
         i = 0
         if segments[0]["label"] == "start":
@@ -1426,7 +1427,7 @@ class ShowStructurer:
                 strobe_ranges=segment_strobe_ranges,
             )
             light_strength_envelope = segments[i]["drum_analysis"]["light_strength_envelope"]
-            # segment_dimmers = self.scale_dimmer_with_envelope(start_time_ms, segment_dimmers, light_strength_envelope, strobe_ranges=strobe_ranges)
+            segment_dimmers = self.scale_dimmer_with_envelope(start_time_ms, segment_dimmers, light_strength_envelope, strobe_ranges=strobe_ranges)
 
             # Add start time wait to script first index
             if start_time_ms > 0:
@@ -1438,8 +1439,8 @@ class ShowStructurer:
             ola_scripts.append(segment_dimmers)
 
             # QLC+ scripts (queue and dimmer, lag scaling only on dimmer)
-            # qlc_scripts.append(self.convert_scripts_to_qlc_format([segment_queue], qlc_delay=qlc_delay, qlc_lag=1.0, is_dimmer=False)[0])
-            # qlc_scripts.append(self.convert_scripts_to_qlc_format([segment_dimmers], qlc_delay=qlc_delay, qlc_lag=qlc_lag, is_dimmer=True)[0])
+            qlc_scripts.append(self.convert_scripts_to_qlc_format([segment_queue], qlc_delay=qlc_delay, qlc_lag=qlc_lag, is_dimmer=False)[0])
+            qlc_scripts.append(self.convert_scripts_to_qlc_format([segment_dimmers], qlc_delay=qlc_delay, qlc_lag=qlc_lag, is_dimmer=True)[0])
 
             function_names.append(str(segments[i]["start"]))
             function_names.append(str(segments[i]["start"]) + "_dimmers")

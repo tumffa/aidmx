@@ -377,6 +377,29 @@ class FixturePattern:
                 return int(strobevalues.get("nicestrobe", 255))
         return 255
 
+    def _percent_to_dimmer_value(self, fixture: Dict[str, Any], percent: Union[int, float]) -> int:
+        """
+        Convert a dimmer percentage (0-100) to raw DMX value using the fixture's
+        dimmer_range. Defaults to [0, 255] if not specified.
+        
+        Args:
+            fixture: Fixture dictionary that may contain 'dimmer_range' key.
+            percent: Dimmer percentage from 0 to 100.
+        
+        Returns:
+            Raw DMX value as an integer.
+        """
+        dimmer_range = fixture.get("dimmer_range", [0, 255])
+        if isinstance(dimmer_range, (list, tuple)) and len(dimmer_range) >= 2:
+            min_val, max_val = int(dimmer_range[0]), int(dimmer_range[1])
+        else:
+            min_val, max_val = 0, 255
+        
+        # Clamp percent to 0-100
+        percent = max(0, min(100, float(percent)))
+        raw_value = min_val + (percent / 100.0) * (max_val - min_val)
+        return int(round(raw_value))
+
     def _compile_for_fixture(
         self,
         fixture: Dict[str, Any],
@@ -404,7 +427,9 @@ class FixturePattern:
         if tgt == "dimmer":
             chan = fixture.get("dimmer")
             if chan is not None:
-                return self._setfixture(fixture["id"], chan, int(value), scale_dimmer)
+                # Convert percentage (0-100) to raw DMX value using dimmer_range
+                raw_value = self._percent_to_dimmer_value(fixture, value)
+                return self._setfixture(fixture["id"], chan, raw_value, scale_dimmer)
             return None
 
         if tgt == "rgb":
@@ -488,12 +513,12 @@ if __name__ == "__main__":
     fp = FixturePattern(name="Example")
     fp.define_pattern([
         0.25,
-        ("dimmer", 255),
+        ("dimmer", 100),  # 100% = full brightness
         0.5,
-        ("dimmer", 0, (255, 1)),
+        ("dimmer", 0, (100, 1)),  # fade from 0% to 100%
         ("rgb", "red", ("blue", 1)),
         0.5,
-        ("dimmer", 0, (255, 1)),
+        ("dimmer", 0, (100, 1)),  # fade from 0% to 100%
     ])
 
     compiled = fp.compile_pattern(fixture_example, interval=500, scale_dimmer="both")
