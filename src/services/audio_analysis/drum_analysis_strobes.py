@@ -137,7 +137,7 @@ def convert_to_start_end_times(grouped_onsets):
     start_end_times = []
     for group in grouped_onsets:
         if group:  # if the group is not empty
-            start = group[0]
-            end = group[-1]
+            start = int(round(group[0] * 1000))
+            end = int(round(group[-1] * 1000))
             start_end_times.append((start, end))
     return start_end_times
