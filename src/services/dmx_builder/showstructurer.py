@@ -16,13 +16,14 @@ class ShowStructurer:
         self.fixture_dimmer_map = {}
         self.fixture_id_qlc_id_map = {}
         self.fixture_dimmerrange = {}  # Maps fixture_id to (min, max) dimmer range
+        self.fixture_color_channels = {}  # Maps fixture_id to set of color channel numbers (for dimmer-less fixtures)
         for group_name, group in self.universe.items():
             for fixture_key, fixture in group.items():
                 fixture_id = fixture["id"]
                 fixture_qlc_id = fixture["qlc_id"]
                 self.fixture_id_qlc_id_map[fixture_id] = fixture.get("qlc_id", fixture_id)
                 self.fixture_addresses[fixture_qlc_id] = fixture["address"]
-                dimmer_channel = fixture["dimmer"]
+                dimmer_channel = fixture.get("dimmer")  # Use .get() to handle None
                 self.fixture_dimmer_map[fixture_id] = dimmer_channel
                 # Store dimmerrange (default [0, 255] if not specified)
                 dimmerrange = fixture.get("dimmerrange", [0, 255])
@@ -30,6 +31,16 @@ class ShowStructurer:
                     self.fixture_dimmerrange[fixture_id] = (int(dimmerrange[0]), int(dimmerrange[1]))
                 else:
                     self.fixture_dimmerrange[fixture_id] = (0, 255)
+                    
+                # For fixtures without separate dimmer channel, track color channels
+                # These channels act as dimmer channels when scale_dimmer flag is set
+                if dimmer_channel is None and fixture.get("colortype") == "seperate":
+                    cc = fixture.get("colorchannels", {}) or {}
+                    color_chs = set()
+                    for ch in [cc.get("red"), cc.get("green"), cc.get("blue")]:
+                        if ch is not None:
+                            color_chs.add(int(ch))
+                    self.fixture_color_channels[fixture_id] = color_chs
 
         self.dimmer_update_fq = 33 # ms
 
@@ -192,7 +203,23 @@ class ShowStructurer:
                 while scripts and not isinstance(scripts[0], (int, float)):
                     cmd = scripts.pop(0)
                     fix_id, channel, value, scale = cmd
-                    if self.fixture_dimmer_map[fix_id] == channel:
+                    
+                    # Determine if this is a "dimmer-like" command:
+                    # 1. Traditional dimmer channel command (fixture_dimmer_map[fix_id] == channel)
+                    # 2. Color channel command for fixture without separate dimmer, with scale_dimmer flag
+                    is_dimmer_cmd = False
+                    dimmer_ch = self.fixture_dimmer_map.get(fix_id)
+                    
+                    if dimmer_ch is not None and dimmer_ch == channel:
+                        # Traditional dimmer channel
+                        is_dimmer_cmd = True
+                    elif dimmer_ch is None and scale is not None:
+                        # Fixture has no dimmer channel - check if this is a color channel with scale_dimmer
+                        color_chs = self.fixture_color_channels.get(fix_id, set())
+                        if channel in color_chs:
+                            is_dimmer_cmd = True
+                    
+                    if is_dimmer_cmd:
                         dimmer_cmds.append(self.map_to_qlc_id(cmd))
                     else:
                         cmds.append(self.map_to_qlc_id(cmd))
@@ -216,7 +243,19 @@ class ShowStructurer:
                 for fix_id, channels in fixture_states.items():
                     for channel, (value, scale) in channels.items():
                         cmd = (fix_id, channel, value, scale)
-                        if self.fixture_dimmer_map[fix_id] == channel:
+                        
+                        # Same logic as above for determining dimmer-like commands
+                        is_dimmer_cmd = False
+                        dimmer_ch = self.fixture_dimmer_map.get(fix_id)
+                        
+                        if dimmer_ch is not None and dimmer_ch == channel:
+                            is_dimmer_cmd = True
+                        elif dimmer_ch is None and scale is not None:
+                            color_chs = self.fixture_color_channels.get(fix_id, set())
+                            if channel in color_chs:
+                                is_dimmer_cmd = True
+                        
+                        if is_dimmer_cmd:
                             dimmer_cmds.append(self.map_to_qlc_id(cmd))
                         else:
                             cmds.append(cmd)
@@ -583,15 +622,29 @@ class ShowStructurer:
                 return flow_fn if src == 1 else snare_fn if src == 2 else beat_fn
             return None
 
-        def _scale_value(value, t_ms, fn, fixture_id=None):
+        def _scale_value(value, t_ms, fn, fixture_id=None, channel=None):
             if fn is None:
                 return value
             t_sec = t_ms / 1000.0
             strength = float(fn(t_sec))
-            # Scale within dimmerrange bounds: min + (value - min) * strength
-            # This ensures envelope=0 gives min (not 0), and envelope=1 gives original value
-            min_val, max_val = self.fixture_dimmerrange.get(fixture_id, (0, 255))
-            scaled = min_val + (float(value) - min_val) * strength
+            
+            # For color channels from dimmer-less fixtures, scale from 0 to value
+            # (don't use dimmerrange which is for dedicated dimmer channels)
+            is_color_channel = False
+            dimmer_ch = self.fixture_dimmer_map.get(fixture_id)
+            if dimmer_ch is None and channel is not None:
+                color_chs = self.fixture_color_channels.get(fixture_id, set())
+                if channel in color_chs:
+                    is_color_channel = True
+            
+            if is_color_channel:
+                # Color channels: scale from 0 to value linearly
+                scaled = float(value) * strength
+            else:
+                # Scale within dimmerrange bounds: min + (value - min) * strength
+                # This ensures envelope=0 gives min (not 0), and envelope=1 gives original value
+                min_val, max_val = self.fixture_dimmerrange.get(fixture_id, (0, 255))
+                scaled = min_val + (float(value) - min_val) * strength
             return max(0, min(255, int(round(scaled))))
 
         # Track per-fixture last original value and selected flag
@@ -625,7 +678,7 @@ class ShowStructurer:
                         fn = _fn_for_flag_at_time(info["flag"], seg_ms)
                         if fn is None:
                             continue
-                        val = _scale_value(info["base"], seg_ms, fn, fixture_id=fx)
+                        val = _scale_value(info["base"], seg_ms, fn, fixture_id=fx, channel=ch)
                         batch.append((int(fx), int(ch), int(val), info["flag"]))
                     if batch:
                         scaled.append(batch)
@@ -647,7 +700,7 @@ class ShowStructurer:
                     continue
 
                 fn = _fn_for_flag_at_time(flag, seg_ms) if flag else None
-                new_val = _scale_value(int(value), seg_ms, fn, fixture_id=fixture_id)
+                new_val = _scale_value(int(value), seg_ms, fn, fixture_id=fixture_id, channel=channel)
                 scaled.append((fixture_id, channel, new_val, flag))
                 continue
 
@@ -669,7 +722,7 @@ class ShowStructurer:
 
                         if not _in_strobe(abs_ms):
                             fn = _fn_for_flag_at_time(flag, seg_ms) if flag else None
-                            new_val = _scale_value(int(value), seg_ms, fn, fixture_id=fixture_id)
+                            new_val = _scale_value(int(value), seg_ms, fn, fixture_id=fixture_id, channel=channel)
                             batch_out.append((fixture_id, channel, new_val, flag))
                             seen.add((fixture_id, channel))
                     else:
@@ -689,7 +742,7 @@ class ShowStructurer:
                     fn = _fn_for_flag_at_time(info["flag"], seg_ms)
                     if fn is None:
                         continue
-                    val = _scale_value(info["base"], seg_ms, fn, fixture_id=fx)
+                    val = _scale_value(info["base"], seg_ms, fn, fixture_id=fx, channel=ch)
                     synth.append((int(fx), int(ch), int(val), info["flag"]))
                 if synth:
                     scaled.append(synth)

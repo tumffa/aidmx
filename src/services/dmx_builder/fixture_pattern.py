@@ -10,6 +10,11 @@ class FixturePattern:
     def __init__(self, name: str):
         self.name = name
         self.pattern: List[Union[float, Tuple[Any, ...]]] = []
+        # State tracking for fixtures without separate dimmer channel (dimmer: None)
+        # These are reset at the start of compile_pattern
+        self._dimmer_pct: float = 100.0  # Current dimmer percentage (0-100)
+        self._rgb_state: Dict[str, int] = {}  # Last RGB values per channel name {"red": 255, ...}
+        self._no_dimmer_channel: bool = False  # True if fixture has dimmer: None
 
     def define_pattern(self, sequence: List[Union[float, Tuple[Any, ...]]]) -> None:
         """
@@ -105,6 +110,12 @@ class FixturePattern:
             if not start_rgb or not end_rgb:
                 return []
 
+            # Update _rgb_state with final values (for dimmer-less fixture tracking)
+            if self._no_dimmer_channel:
+                self._rgb_state["red"] = end_rgb[0]
+                self._rgb_state["green"] = end_rgb[1]
+                self._rgb_state["blue"] = end_rgb[2]
+
             cc = fixture.get("colorchannels", {}) or {}
             rch, gch, bch = cc.get("red"), cc.get("green"), cc.get("blue")
 
@@ -121,6 +132,49 @@ class FixturePattern:
             steps = max(1, min(steps_by_time, steps_by_value))
             step_wait = max(1, int(round(total_ms / float(steps))))
 
+            # For fixtures without dimmer channel, we need to scale RGB values by dimmer percentage
+            if self._no_dimmer_channel:
+                scale = max(0.0, min(1.0, self._dimmer_pct / 100.0))
+                fixture_id = fixture["id"]
+                
+                def build_seq_scaled(ch_name: str, v_start: int, v_end: int) -> Optional[List[Any]]:
+                    ch = cc.get(ch_name)
+                    if ch is None:
+                        return None
+                    scaled_start = int(round(v_start * scale))
+                    scaled_end = int(round(v_end * scale))
+                    scaled_start = max(0, min(255, scaled_start))
+                    scaled_end = max(0, min(255, scaled_end))
+                    
+                    start_cmd = self._setfixture(fixture_id, int(ch), scaled_start, scale_dimmer)
+                    end_cmd = self._setfixture(fixture_id, int(ch), scaled_end, scale_dimmer)
+                    
+                    if total_ms <= 1 or v_start == v_end:
+                        return [0, start_cmd, max(1, int(round(total_ms))), end_cmd]
+                    
+                    delta = v_end - v_start
+                    seq: List[Any] = [0, start_cmd]
+                    for i in range(1, steps + 1):
+                        vi = int(round(v_start + delta * (i / float(steps)))) if i < steps else int(v_end)
+                        scaled_vi = int(round(vi * scale))
+                        scaled_vi = max(0, min(255, scaled_vi))
+                        step_cmd = self._setfixture(fixture_id, int(ch), scaled_vi, scale_dimmer)
+                        seq.append(step_wait)
+                        seq.append(step_cmd)
+                    return seq
+                
+                seqs: List[List[Any]] = []
+                r_seq = build_seq_scaled("red", start_rgb[0], end_rgb[0])
+                g_seq = build_seq_scaled("green", start_rgb[1], end_rgb[1])
+                b_seq = build_seq_scaled("blue", start_rgb[2], end_rgb[2])
+                for s in (r_seq, g_seq, b_seq):
+                    if s:
+                        seqs.append(s)
+                if not seqs:
+                    return []
+                return self._combine_sequences(seqs)
+
+            # Standard path for fixtures with dimmer channel
             seqs: List[List[Any]] = []
             def build_seq(ch_name: str, v_start: int, v_end: int) -> Optional[List[Any]]:
                 # Use compile_for_fixture for all emitted commands
@@ -159,6 +213,58 @@ class FixturePattern:
         # For dimmer, interpolate in percentage space (val1, val2 are percentages)
         # to avoid double-conversion through dimmerrange
         if str(target).lower() == "dimmer":
+            # Handle fixtures without separate dimmer channel
+            if fixture.get("dimmer") is None and fixture.get("colortype") == "seperate":
+                pct_start = float(val1)
+                pct_end = float(val2)
+                
+                # If no RGB state, we can't do anything
+                if not self._rgb_state:
+                    # Update dimmer percentage anyway
+                    self._dimmer_pct = max(0.0, min(100.0, pct_end))
+                    return []
+                
+                if total_ms <= 1 or pct_start == pct_end:
+                    self._dimmer_pct = max(0.0, min(100.0, pct_end))
+                    cmds = self._generate_scaled_rgb_commands(
+                        fixture, self._rgb_state, pct_end, scale_dimmer
+                    )
+                    return [0] + cmds if cmds else []
+                
+                delta_pct = pct_end - pct_start
+                
+                # Choose steps based on percentage change
+                min_wait_ms = 33
+                steps_by_time = max(1, int(total_ms // min_wait_ms))
+                increment_pct = 5
+                steps_by_value = max(1, int(math.ceil(abs(delta_pct) / float(increment_pct))))
+                steps = max(1, min(steps_by_time, steps_by_value))
+                
+                step_wait = max(1, int(round(total_ms / float(steps))))
+                
+                # Generate initial commands at pct_start
+                start_cmds = self._generate_scaled_rgb_commands(
+                    fixture, self._rgb_state, pct_start, scale_dimmer
+                )
+                seq: List[Any] = [0] + start_cmds if start_cmds else [0]
+                
+                for i in range(1, steps + 1):
+                    if i < steps:
+                        pct_i = pct_start + delta_pct * (i / float(steps))
+                    else:
+                        pct_i = pct_end
+                    step_cmds = self._generate_scaled_rgb_commands(
+                        fixture, self._rgb_state, pct_i, scale_dimmer
+                    )
+                    if step_cmds:
+                        seq.append(step_wait)
+                        seq.extend(step_cmds)
+                
+                # Update the dimmer percentage state
+                self._dimmer_pct = max(0.0, min(100.0, pct_end))
+                return seq
+            
+            # Standard path for fixtures with dimmer channel
             c1 = self._compile_for_fixture(fixture, (target, val1), scale_dimmer)
             c2 = self._compile_for_fixture(fixture, (target, val2), scale_dimmer)
             if c1 is None or c2 is None:
@@ -316,6 +422,65 @@ class FixturePattern:
 
         return combined
 
+    def _resolve_rgb_values(self, value: Any) -> Optional[Dict[str, int]]:
+        """
+        Resolve an RGB value specification to individual channel values.
+        
+        Args:
+            value: Color name (str), tuple of (r, g, b), or dict {"red": r, "green": g, "blue": b}
+        
+        Returns:
+            Dict with "red", "green", "blue" keys and integer values, or None if cannot resolve.
+        """
+        rgb_map = self._rgb_map()
+        if isinstance(value, str):
+            m = rgb_map.get(value.lower())
+            if m:
+                return {"red": int(m["red"]), "green": int(m["green"]), "blue": int(m["blue"])}
+            return None
+        if isinstance(value, tuple) and len(value) == 3:
+            return {"red": int(value[0]), "green": int(value[1]), "blue": int(value[2])}
+        if isinstance(value, dict):
+            if "red" in value and "green" in value and "blue" in value:
+                return {"red": int(value["red"]), "green": int(value["green"]), "blue": int(value["blue"])}
+        return None
+
+    def _generate_scaled_rgb_commands(
+        self,
+        fixture: Dict[str, Any],
+        rgb_values: Dict[str, int],
+        dimmer_pct: float,
+        scale_dimmer: Optional[Any] = None,
+    ) -> List[CommandTuple]:
+        """
+        Generate RGB channel commands scaled by the dimmer percentage.
+        Used for fixtures without a separate dimmer channel.
+        
+        Args:
+            fixture: Fixture dictionary
+            rgb_values: Dict with "red", "green", "blue" keys and unscaled values (0-255)
+            dimmer_pct: Dimmer percentage (0-100)
+            scale_dimmer: Optional scale_dimmer flag to pass through
+        
+        Returns:
+            List of command tuples for each RGB channel
+        """
+        cc = fixture.get("colorchannels", {}) or {}
+        fixture_id = fixture["id"]
+        cmds: List[CommandTuple] = []
+        
+        scale = max(0.0, min(1.0, dimmer_pct / 100.0))
+        
+        for color_name in ["red", "green", "blue"]:
+            ch = cc.get(color_name)
+            if ch is not None and color_name in rgb_values:
+                unscaled = rgb_values[color_name]
+                scaled_val = int(round(unscaled * scale))
+                scaled_val = max(0, min(255, scaled_val))
+                cmds.append(self._setfixture(fixture_id, int(ch), scaled_val, scale_dimmer))
+        
+        return cmds
+
     def compile_pattern(
         self,
         fixture: Dict[str, Any],
@@ -329,7 +494,15 @@ class FixturePattern:
         (target, val1, (val2, fraction)) becomes a transition sequence over
         fraction * interval. Consecutive 3-tuples with different targets are
         converted then merged by time-slicing.
+        
+        For fixtures with dimmer: None, dimmer commands are converted to scaled RGB
+        commands, and RGB commands are scaled by the current dimmer percentage.
         """
+        # Initialize state for dimmer-less fixtures
+        self._no_dimmer_channel = (fixture.get("dimmer") is None)
+        self._dimmer_pct = 100.0
+        self._rgb_state = {}
+        
         output: List[Any] = []
         i = 0
         n = len(self.pattern)
@@ -346,6 +519,36 @@ class FixturePattern:
                 # (target, val1)
                 if len(entry) == 2:
                     target, val1 = entry
+                    tgt = str(target).lower()
+                    
+                    # Handle dimmer for fixtures without separate dimmer channel
+                    if tgt == "dimmer" and self._no_dimmer_channel:
+                        new_pct = float(val1)
+                        self._dimmer_pct = max(0.0, min(100.0, new_pct))
+                        # If we have stored RGB values, emit scaled commands
+                        if self._rgb_state:
+                            cmds = self._generate_scaled_rgb_commands(
+                                fixture, self._rgb_state, self._dimmer_pct, scale_dimmer
+                            )
+                            output.extend(cmds)
+                        i += 1
+                        continue
+                    
+                    # Handle RGB for fixtures without separate dimmer channel
+                    if tgt == "rgb" and self._no_dimmer_channel and fixture.get("colortype") == "seperate":
+                        rgb_vals = self._resolve_rgb_values(val1)
+                        if rgb_vals:
+                            # Store unscaled values
+                            self._rgb_state.update(rgb_vals)
+                            # Emit scaled commands
+                            cmds = self._generate_scaled_rgb_commands(
+                                fixture, rgb_vals, self._dimmer_pct, scale_dimmer
+                            )
+                            output.extend(cmds)
+                        i += 1
+                        continue
+                    
+                    # Standard path for fixtures with dimmer channel
                     cmd = self._compile_for_fixture(fixture, (target, val1), scale_dimmer)
                     if cmd is not None:
                         output.append(cmd)

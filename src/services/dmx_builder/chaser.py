@@ -271,6 +271,10 @@ def color_pulse(universe, interval, length=None):
     # ch.add_pattern(fp, fixtures["3"], interval=interval, scale_dimmer="both")
     # ch.add_pattern(fp, fixtures["4"], interval=interval, scale_dimmer="both")
 
+    bar_spots = universe["bar_spots"]
+    ch.add_pattern(fp, bar_spots["1"], interval=interval, scale_dimmer="both")
+    ch.add_pattern(fp, bar_spots["2"], interval=interval, scale_dimmer="both")
+
     return ch.compile(length=length)
 
 def strobe(universe, interval=500, length=None):
